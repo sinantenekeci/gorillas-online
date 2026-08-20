@@ -12,6 +12,20 @@ kopma hâlinde hükmen sonuç.
 Başlangıç noktası tek dosyalık `gorillas-1.html` idi; fizik ve çizim oradan
 korundu, ağ katmanı etrafına kuruldu.
 
+## Canlı ortam
+
+- **Adres:** https://gorillas-online-rsku.onrender.com
+  (`gorillas-online.onrender.com` başka bir Render kullanıcısına ait, o yüzden
+  ada `-rsku` eki geldi. Karıştırmayın.)
+- **Barındırma:** Render ücretsiz plan, `render.yaml` blueprint'i ile.
+  512 MB RAM, 15 dakika işsizlikten sonra uyku, 30-60 sn soğuk açılış.
+- **Otomatik dağıtım açık.** `main`'e push → Render derler ve devreye alır
+  (ölçülen süre ~25 sn). Ücretsiz planda kesintisiz geçiş yoktur: eski süreç
+  durur, yeni başlar. Her şey bellekte olduğu için **bağlı olan herkes düşer
+  ve açık odalar silinir** — maç sırasında push etmeyin. Belge değişikliği de
+  dağıtım tetikler; gerekirse `render.yaml`'a build filtresi eklenebilir.
+- Dosya sistemi geçicidir; hiçbir şey diske yazılmamalı (zaten yazılmıyor).
+
 ## Mimari kararlar (ve nedenleri)
 
 **Sunucu otoriter, istemci yalnız oynatıcı.**
