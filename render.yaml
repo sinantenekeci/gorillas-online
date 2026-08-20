@@ -1,0 +1,17 @@
+# Render.com "Blueprint" tanımı. Ücretsiz plan WebSocket destekler;
+# 15 dakika trafik almazsa uyur, ilk istek ~30-60 sn sürer ve
+# uyandığında bellekteki odalar sıfırlanır.
+services:
+  - type: web
+    name: gorillas-online
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: MAX_CONN_PER_IP
+        value: "8"

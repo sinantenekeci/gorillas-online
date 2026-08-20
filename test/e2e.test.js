@@ -1,0 +1,233 @@
+"use strict";
+/* Uçtan uca: gerçek HTTP + gerçek WebSocket üzerinden iki oyuncu.
+   "Derlendi" değil, "çalışıyor" kanıtı bu dosyada. */
+process.env.GORILLAS_SPEED = process.env.GORILLAS_SPEED || "200";
+
+const test = require("node:test");
+const assert = require("node:assert");
+const WebSocket = require("ws");
+const { server, hub, wss } = require("../server/index.js");
+
+let base = "";
+
+test.before(async () => {
+  await new Promise((res) => server.listen(0, "127.0.0.1", res));
+  base = "http://127.0.0.1:" + server.address().port;
+});
+
+test.after(() => {
+  hub.destroy();
+  for (const ws of wss.clients) ws.terminate();   // acik soket sunucuyu kapanmaktan alikoymasin
+  wss.close();
+  server.close();
+});
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function get(path) {
+  return fetch(base + path).then(async (r) => ({
+    status: r.status,
+    type: r.headers.get("content-type") || "",
+    body: await r.text()
+  }));
+}
+
+/* Basit test istemcisi: mesajları biriktirir, beklenen türü bekler. */
+function connect(name) {
+  const ws = new WebSocket(base.replace("http", "ws") + "/ws");
+  const inbox = [];
+  const c = {
+    ws, inbox, name,
+    id: null,
+    send(o) { ws.send(JSON.stringify(o)); },
+    last(t) { for (let i = inbox.length - 1; i >= 0; i--) if (inbox[i].t === t) return inbox[i]; return null; },
+    all(t) { return inbox.filter((m) => m.t === t); },
+    clear() { inbox.length = 0; },
+    async wait(t, ms) {
+      const end = Date.now() + (ms || 3000);
+      while (Date.now() < end) {
+        const m = c.last(t);
+        if (m) return m;
+        await sleep(10);
+      }
+      throw new Error("beklenen mesaj gelmedi: " + t);
+    },
+    close() { return new Promise((r) => { ws.on("close", r); ws.close(); }); }
+  };
+  ws.on("message", (d) => {
+    const m = JSON.parse(d.toString());
+    inbox.push(m);
+    if (m.t === "welcome") c.id = m.id;
+  });
+  return new Promise((res, rej) => {
+    ws.on("open", () => { c.send({ t: "rename", name: name }); res(c); });
+    ws.on("error", rej);
+  });
+}
+
+/* ---------------- HTTP ---------------- */
+test("ana sayfa ve varlıklar sunulur", async () => {
+  const index = await get("/");
+  assert.strictEqual(index.status, 200);
+  assert.match(index.type, /text\/html/);
+  assert.ok(index.body.indexOf("GORILLAS") >= 0);
+
+  const css = await get("/css/style.css");
+  assert.strictEqual(css.status, 200);
+  assert.match(css.type, /text\/css/);
+
+  const core = await get("/shared/game-core.js");
+  assert.strictEqual(core.status, 200);
+  assert.ok(core.body.indexOf("simulateShot") >= 0, "istemci çekirdeği alabilmeli");
+});
+
+test("sağlık ucu çalışır", async () => {
+  const h = await get("/health");
+  assert.strictEqual(h.status, 200);
+  const j = JSON.parse(h.body);
+  assert.strictEqual(j.ok, true);
+  assert.ok(typeof j.rooms === "number");
+});
+
+test("dizin dışına çıkma denemeleri engellenir", async () => {
+  for (const p of ["/../server/rooms.js", "/..%2fserver%2frooms.js", "/shared/../server/index.js"]) {
+    const r = await get(p);
+    assert.ok(r.status === 403 || r.status === 404, p + " -> " + r.status);
+    assert.ok(r.body.indexOf("Hub") < 0, "sunucu kaynağı sızmamalı: " + p);
+  }
+});
+
+test("bilinmeyen yol 404 döner", async () => {
+  const r = await get("/olmayan-sayfa");
+  assert.strictEqual(r.status, 404);
+});
+
+/* ---------------- WebSocket ---------------- */
+test("iki oyuncu odada buluşur, yazışır ve maçı oynar", async () => {
+  const ali = await connect("Ali");
+  const ayse = await connect("Ayşe");
+  await ali.wait("welcome");
+  await ayse.wait("welcome");
+
+  ali.send({ t: "create", name: "E2E Odası", settings: { rounds: 1, turnSeconds: 120 } });
+  const joined = await ali.wait("joined");
+  const roomId = joined.roomId;
+  assert.match(roomId, /^[A-Z2-9]{6}$/);
+
+  // ikinci oyuncu lobide odayı görüyor mu (eski liste ile karışmasın diye kutu boşaltılır)
+  ayse.clear();
+  ayse.send({ t: "rooms" });
+  const list = await ayse.wait("rooms");
+  assert.ok(list.rooms.some((r) => r.id === roomId), "oda listede görünmeli");
+
+  ayse.send({ t: "join", roomId: roomId });
+  await ayse.wait("joined");
+
+  // sohbet iki yönlü çalışıyor
+  ayse.clear();
+  ali.send({ t: "chat", text: "muz hazır mı" });
+  const chat = await (async () => {
+    const end = Date.now() + 3000;
+    while (Date.now() < end) {
+      const m = ayse.all("chat").find((x) => !x.system && x.text === "muz hazır mı");
+      if (m) return m;
+      await sleep(10);
+    }
+    throw new Error("sohbet iletilmedi");
+  })();
+  assert.strictEqual(chat.name, "Ali");
+
+  // maç başlar
+  const round = await ali.wait("round", 5000);
+  assert.strictEqual(round.round, 1);
+  assert.deepStrictEqual(round.names, ["Ali", "Ayşe"]);
+  assert.ok(Math.abs(round.wind) <= 4);
+
+  // rastgele harita testi kırılgan yapmasın: sahneyi bilinen boş bir düzene sabitliyoruz
+  hub.rooms.get(roomId).match.state = {
+    buildings: [], craters: [], gravity: 9.8, wind: 0, sunHit: true,
+    gorillas: [{ x: 60, y: 300, dead: false }, { x: 600, y: 380, dead: false }]
+  };
+
+  // sırası olmayan atış yapamaz
+  const before = ali.all("shot").length;
+  ayse.send({ t: "fire", angle: 45, velocity: 100 });
+  await sleep(150);
+  assert.strictEqual(ali.all("shot").length, before, "sırası olmayanın atışı yok sayılmalı");
+
+  // sıradaki oyuncu atar, iki taraf da aynı yörüngeyi alır
+  ali.send({ t: "fire", angle: 45, velocity: 200 });
+  const s1 = await ali.wait("shot");
+  const s2 = await ayse.wait("shot");
+  assert.deepStrictEqual(s1.frames, s2.frames, "iki istemci aynı yörüngeyi görmeli");
+  assert.strictEqual(s1.seat, 0);
+  assert.ok(s1.frames.length > 2, "yörünge birden fazla kare sürmeli");
+  assert.strictEqual(s1.impact.type, "out", "boş sahnede muz ekrandan çıkmalı");
+
+  // ıskadan sonra sıra rakibe geçer
+  const turn = await (async () => {
+    const end = Date.now() + 5000;
+    while (Date.now() < end) {
+      const t = ayse.last("turn");
+      if (t && t.turn === 1) return t;
+      await sleep(10);
+    }
+    throw new Error("sıra devredilmedi");
+  })();
+  assert.strictEqual(turn.turn, 1);
+
+  await ali.close();
+  await ayse.close();
+});
+
+test("şifreli odaya yalnızca şifreyi bilen girer", async () => {
+  const host = await connect("Host");
+  await host.wait("welcome");
+  host.send({ t: "create", name: "Kapalı Devre", password: "muz" });
+  const roomId = (await host.wait("joined")).roomId;
+
+  const gate = await connect("Yabancı");
+  await gate.wait("welcome");
+  gate.send({ t: "join", roomId: roomId, password: "yanlış" });
+  const err = await gate.wait("err");
+  assert.strictEqual(err.code, "badpass");
+
+  gate.send({ t: "join", roomId: roomId, password: "muz" });
+  await gate.wait("joined");
+
+  await host.close();
+  await gate.close();
+});
+
+test("bağlantı kopunca oyuncu odadan düşer", async () => {
+  const a = await connect("Kalan");
+  await a.wait("welcome");
+  a.send({ t: "create", name: "Kopma Testi" });
+  const roomId = (await a.wait("joined")).roomId;
+
+  const b = await connect("Giden");
+  await b.wait("welcome");
+  b.send({ t: "join", roomId: roomId });
+  await b.wait("joined");
+  assert.strictEqual(hub.rooms.get(roomId).members.length, 2);
+
+  await b.close();
+  const end = Date.now() + 3000;
+  while (Date.now() < end && hub.rooms.get(roomId).members.length > 1) await sleep(10);
+  assert.strictEqual(hub.rooms.get(roomId).members.length, 1);
+
+  await a.close();
+});
+
+test("bozuk veri bağlantıyı düşürmez", async () => {
+  const a = await connect("Kirli");
+  await a.wait("welcome");
+  a.ws.send("bu json degil");
+  a.ws.send(JSON.stringify([1, 2, 3]));
+  a.ws.send(JSON.stringify({ t: 42 }));
+  await sleep(120);
+  a.send({ t: "rooms" });
+  const list = await a.wait("rooms");
+  assert.ok(Array.isArray(list.rooms), "bağlantı hâlâ çalışıyor olmalı");
+  await a.close();
+});

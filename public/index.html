@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GORILLAS ONLINE — Muz Savaşları</title>
+<meta name="description" content="QBasic klasiği Gorillas'ın çok oyunculu sürümü. Oda kur, arkadaşlarını çağır, sırayla muz at.">
+<meta name="theme-color" content="#0F172A">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap">
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<!-- ikon seti: tek stil, 2px cizgi kalinligi, 24px kutu -->
+<svg class="sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="10" rx="1"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0"/><path d="M16 6.5a3 3 0 0 1 0 5.8"/><path d="M17.5 20a6 6 0 0 0-2.4-4.8"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M4 12 20 4l-4 16-4-6-8-2Z"/></symbol>
+  <symbol id="i-exit" viewBox="0 0 24 24"><path d="M14 5H6v14h8"/><path d="M13 12h8"/><path d="m17 8 4 4-4 4"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2m0 14v2M3 12h2m14 0h2M5.6 5.6l1.5 1.5m9.8 9.8 1.5 1.5m0-12.8-1.5 1.5M7.1 16.9l-1.5 1.5"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7"/><path d="M20 4v5h-5"/></symbol>
+  <symbol id="i-seat" viewBox="0 0 24 24"><path d="M6 4h12v9H6z"/><path d="M4 13h16v3H4z"/><path d="M7 16v4m10-4v4"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s4-6 10-6 10 6 10 6-4 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="2.5"/></symbol>
+  <symbol id="i-sound" viewBox="0 0 24 24"><path d="M5 9h3l4-4v14l-4-4H5z"/><path d="M16 9.5a3.5 3.5 0 0 1 0 5"/><path d="M18.5 7a7 7 0 0 1 0 10"/></symbol>
+  <symbol id="i-mute" viewBox="0 0 24 24"><path d="M5 9h3l4-4v14l-4-4H5z"/><path d="m16 10 5 4m0-4-5 4"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a4 4 0 0 0 6 .5l2-2a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 11a4 4 0 0 0-6-.5l-2 2A4 4 0 0 0 11.7 18l1-1"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+  <symbol id="i-boot" viewBox="0 0 24 24"><path d="M12 4v8"/><path d="M7.5 6.5a7 7 0 1 0 9 0"/></symbol>
+</svg>
+
+<a class="skip-link" href="#main">Ana içeriğe atla</a>
+
+<header class="topbar">
+  <div class="topbar__brand">
+    <span class="logo" aria-hidden="true"></span>
+    <div>
+      <h1>GORILLAS<span>ONLINE</span></h1>
+      <p class="topbar__tag">Muz savaşları &middot; 1990'dan beri</p>
+    </div>
+  </div>
+  <div class="topbar__right">
+    <button id="nickBtn" class="chip" type="button" aria-label="Takma adını değiştir">
+      <svg class="ic" aria-hidden="true"><use href="#i-users"/></svg>
+      <span id="nickLabel">Goril</span>
+    </button>
+    <button id="soundBtn" class="chip" type="button" aria-pressed="true" aria-label="Sesi kapat">
+      <svg class="ic" aria-hidden="true"><use href="#i-sound"/></svg>
+      <span class="chip__text">SES</span>
+    </button>
+    <span id="netStatus" class="status status--wait" role="status">
+      <span class="status__dot" aria-hidden="true"></span><span id="netText">bağlanıyor</span>
+    </span>
+  </div>
+</header>
+
+<main id="main">
+
+  <!-- ================= LOBI ================= -->
+  <section id="viewLobby" class="view view--lobby">
+    <div class="lobby__head">
+      <div>
+        <h2 class="h-section">ODALAR</h2>
+        <p class="muted" id="lobbyCount">Sunucuya bağlanılıyor…</p>
+      </div>
+      <div class="lobby__actions">
+        <label class="field field--inline">
+          <span class="field__label">ARA</span>
+          <input id="roomSearch" type="search" placeholder="oda adı veya kod" autocomplete="off">
+        </label>
+        <button id="refreshBtn" class="btn btn--ghost" type="button">
+          <svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg> YENİLE
+        </button>
+        <button id="createBtn" class="btn btn--primary" type="button">
+          <svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg> ODA KUR
+        </button>
+      </div>
+    </div>
+
+    <ul id="roomList" class="rooms" aria-live="polite"></ul>
+
+    <div id="roomsEmpty" class="empty" hidden>
+      <svg class="empty__ic" aria-hidden="true"><use href="#i-boot"/></svg>
+      <h3>Ortalık sakin</h3>
+      <p class="muted">Henüz açık oda yok. İlk odayı sen kur, linki arkadaşlarına at.</p>
+      <button class="btn btn--primary" type="button" data-act="create">
+        <svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg> ODA KUR
+      </button>
+    </div>
+
+    <section class="howto">
+      <h3 class="h-section">NASIL OYNANIR</h3>
+      <ol class="howto__list">
+        <li><b>Odaya gir.</b> İki oyuncu sahaya oturur, kalanlar izler ve sohbet eder.</li>
+        <li><b>Açı ve hızı ayarla.</b> Rüzgâr muzu iter, yerçekimi aşağı çeker.</li>
+        <li><b>Vur ve devral.</b> Maçı kazanan koltuğunda kalır, kaybeden sıranın sonuna geçer.</li>
+      </ol>
+    </section>
+  </section>
+
+  <!-- ================= ODA ================= -->
+  <section id="viewRoom" class="view view--room" hidden>
+    <div class="room__main">
+      <div class="room__bar">
+        <button id="leaveBtn" class="btn btn--ghost btn--sm" type="button">
+          <svg class="ic" aria-hidden="true"><use href="#i-exit"/></svg> ÇIK
+        </button>
+        <h2 id="roomName" class="room__name">Oda</h2>
+        <button id="copyLinkBtn" class="btn btn--ghost btn--sm" type="button">
+          <svg class="ic" aria-hidden="true"><use href="#i-link"/></svg>
+          <span id="roomCode">------</span>
+        </button>
+        <button id="settingsBtn" class="btn btn--ghost btn--sm" type="button" hidden>
+          <svg class="ic" aria-hidden="true"><use href="#i-gear"/></svg> AYARLAR
+        </button>
+      </div>
+
+      <div class="scoreboard">
+        <div class="score score--p1">
+          <span class="score__name" id="s1name">—</span>
+          <span class="score__val" id="s1val">0</span>
+        </div>
+        <div class="score__mid">
+          <span id="roundLabel">RAUNT –/–</span>
+          <span id="windLabel" class="muted">rüzgâr yok</span>
+        </div>
+        <div class="score score--p2">
+          <span class="score__val" id="s2val">0</span>
+          <span class="score__name" id="s2name">—</span>
+        </div>
+      </div>
+
+      <div id="stage" class="stage">
+        <canvas id="c" width="640" height="400" role="img"
+                aria-label="Gökdelenlerin üzerindeki iki goril ve atılan muz"></canvas>
+        <div id="overlay" class="overlay" hidden>
+          <h3 id="overlayTitle">BEKLENİYOR</h3>
+          <p id="overlayText" class="muted"></p>
+        </div>
+      </div>
+
+      <div class="controls" id="controls">
+        <div class="controls__turn">
+          <span id="turnText">Oyuncular bekleniyor…</span>
+          <span class="timer" id="timerWrap" hidden>
+            <span class="timer__bar"><span class="timer__fill" id="timerFill"></span></span>
+            <span class="timer__num" id="timerNum">30</span>
+          </span>
+        </div>
+        <div class="controls__row">
+          <div class="ctl">
+            <label class="field__label" for="ang">AÇI <span class="readout" id="angV">45</span>&deg;</label>
+            <input id="ang" type="range" min="0" max="90" step="1" value="45" disabled>
+          </div>
+          <div class="ctl">
+            <label class="field__label" for="vel">HIZ <span class="readout" id="velV">50</span></label>
+            <input id="vel" type="range" min="1" max="200" step="1" value="50" disabled>
+          </div>
+          <button id="fireBtn" class="btn btn--accent btn--fire" type="button" disabled>MUZU AT</button>
+        </div>
+        <p class="hint">
+          Kaydırıcıları sürükle, <kbd>Enter</kbd> ile at. Noktalar yalnızca çıkış yönünü gösterir.
+          <span id="seatHint"></span>
+        </p>
+      </div>
+    </div>
+
+    <aside class="room__side">
+      <section class="panel panel--players">
+        <h3 class="panel__title">
+          <svg class="ic" aria-hidden="true"><use href="#i-seat"/></svg> SAHADA
+        </h3>
+        <ul id="seatList" class="seats"></ul>
+        <button id="seatBtn" class="btn btn--ghost btn--sm btn--full" type="button" hidden>SAHAYA OTUR</button>
+
+        <h3 class="panel__title">
+          <svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg> SIRADA
+          <span id="queueCount" class="badge">0</span>
+        </h3>
+        <ol id="queueList" class="queue"></ol>
+      </section>
+
+      <section class="panel panel--chat">
+        <h3 class="panel__title">SOHBET</h3>
+        <div id="chatLog" class="chat" role="log" aria-live="polite" aria-relevant="additions"></div>
+        <form id="chatForm" class="chat__form" autocomplete="off">
+          <label class="sr-only" for="chatInput">Mesaj yaz</label>
+          <input id="chatInput" maxlength="200" placeholder="mesaj yaz…">
+          <button class="btn btn--primary btn--icon" type="submit" aria-label="Mesajı gönder">
+            <svg class="ic" aria-hidden="true"><use href="#i-send"/></svg>
+          </button>
+        </form>
+      </section>
+    </aside>
+  </section>
+</main>
+
+<!-- ================= MODALLAR ================= -->
+<div id="modalRoot" class="modal" hidden>
+  <div class="modal__scrim" data-close></div>
+
+  <div class="modal__box" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal__head">
+      <h2 id="modalTitle">Başlık</h2>
+      <button class="btn btn--ghost btn--icon" type="button" data-close aria-label="Kapat">
+        <svg class="ic" aria-hidden="true"><use href="#i-close"/></svg>
+      </button>
+    </div>
+
+    <!-- oda kurma -->
+    <form id="formCreate" class="modal__body" hidden>
+      <label class="field">
+        <span class="field__label">ODA ADI</span>
+        <input id="crName" maxlength="24" required placeholder="Muz Ligi">
+      </label>
+      <label class="field">
+        <span class="field__label">ŞİFRE <span class="muted">(boş bırakırsan herkese açık)</span></span>
+        <input id="crPass" type="password" maxlength="64" autocomplete="new-password" placeholder="—">
+      </label>
+      <div class="grid2">
+        <label class="field">
+          <span class="field__label">RAUNT</span>
+          <select id="crRounds"><option>1</option><option selected>3</option><option>5</option><option>7</option></select>
+        </label>
+        <label class="field">
+          <span class="field__label">YERÇEKİMİ</span>
+          <select id="crGrav">
+            <option value="1.6">Ay (1.6)</option>
+            <option value="9.8" selected>Dünya (9.8)</option>
+            <option value="24.8">Jüpiter (24.8)</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field__label">RÜZGÂR</span>
+          <select id="crWind"><option value="1" selected>Açık</option><option value="0">Kapalı</option></select>
+        </label>
+        <label class="field">
+          <span class="field__label">KİŞİ SINIRI</span>
+          <select id="crMax"><option>2</option><option>4</option><option selected>8</option><option>12</option><option>16</option></select>
+        </label>
+        <label class="field field--wide">
+          <span class="field__label">TUR SÜRESİ <span class="readout" id="crTurnV">30</span> sn</span>
+          <input id="crTurn" type="range" min="10" max="120" step="5" value="30">
+        </label>
+      </div>
+      <p class="field__help">Şifreli odaya yalnızca şifreyi bilenler girer. Oda son kişi çıkınca silinir.</p>
+      <div class="modal__foot">
+        <button class="btn btn--ghost" type="button" data-close>VAZGEÇ</button>
+        <button class="btn btn--primary" type="submit">ODAYI KUR</button>
+      </div>
+    </form>
+
+    <!-- sifre sorma -->
+    <form id="formJoin" class="modal__body" hidden>
+      <p class="modal__lead" id="joinLead">Bu oda şifreli.</p>
+      <label class="field">
+        <span class="field__label">ŞİFRE</span>
+        <input id="jnPass" type="password" maxlength="64" autocomplete="current-password" required>
+      </label>
+      <p class="field__err" id="jnErr" role="alert" hidden></p>
+      <div class="modal__foot">
+        <button class="btn btn--ghost" type="button" data-close>VAZGEÇ</button>
+        <button class="btn btn--primary" type="submit">GİR</button>
+      </div>
+    </form>
+
+    <!-- takma ad -->
+    <form id="formNick" class="modal__body" hidden>
+      <label class="field">
+        <span class="field__label">TAKMA AD</span>
+        <input id="nkName" maxlength="14" required placeholder="Goril">
+      </label>
+      <p class="field__help">En fazla 14 karakter. Aynı odada isim çakışırsa sonuna numara eklenir.</p>
+      <div class="modal__foot">
+        <button class="btn btn--ghost" type="button" data-close>VAZGEÇ</button>
+        <button class="btn btn--primary" type="submit">KAYDET</button>
+      </div>
+    </form>
+
+    <!-- oda ayarlari -->
+    <form id="formSettings" class="modal__body" hidden>
+      <div class="grid2">
+        <label class="field">
+          <span class="field__label">RAUNT</span>
+          <select id="stRounds"><option>1</option><option>3</option><option>5</option><option>7</option></select>
+        </label>
+        <label class="field">
+          <span class="field__label">YERÇEKİMİ</span>
+          <select id="stGrav">
+            <option value="1.6">Ay (1.6)</option>
+            <option value="9.8">Dünya (9.8)</option>
+            <option value="24.8">Jüpiter (24.8)</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field__label">RÜZGÂR</span>
+          <select id="stWind"><option value="1">Açık</option><option value="0">Kapalı</option></select>
+        </label>
+        <label class="field">
+          <span class="field__label">KİŞİ SINIRI</span>
+          <select id="stMax"><option>2</option><option>4</option><option>8</option><option>12</option><option>16</option></select>
+        </label>
+        <label class="field field--wide">
+          <span class="field__label">TUR SÜRESİ <span class="readout" id="stTurnV">30</span> sn</span>
+          <input id="stTurn" type="range" min="10" max="120" step="5" value="30">
+        </label>
+      </div>
+      <p class="field__help">Ayarlar maç sırasında değiştirilemez; bir sonraki maçta geçerli olur.</p>
+      <div class="modal__foot">
+        <button class="btn btn--ghost" type="button" data-close>VAZGEÇ</button>
+        <button class="btn btn--primary" type="submit">UYGULA</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="/shared/game-core.js"></script>
+<script src="/js/net.js"></script>
+<script src="/js/game.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>
