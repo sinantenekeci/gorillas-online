@@ -37,7 +37,9 @@
   let room = null;            // son roomState
   let mySeat = -1;
   let phase = "idle";         // idle | aim | resolving | roundover | matchover
-  let pendingJoin = null;     // {roomId, name}
+  let pendingJoin = null;     // {roomId}
+  let lastJoin = null;        // {roomId, password} — yalnızca bellekte, yeniden bağlanınca odaya dönmek için
+  let lastPassword = "";      // son denenen oda şifresi; diske yazılmaz
   let timer = { end: 0, total: 30, raf: 0 };
   let soundOn = store.get("gor.sound", "1") === "1";
 
@@ -99,10 +101,29 @@
     }
   });
 
+  /* Sunucu yeniden başlatıldığında (yayın, uyku, ağ kesintisi) odadaki yerimiz
+     kaybolur. Yerel durumu temizlemezsek "bağlı" yazarken hiçbir odada olmayan
+     hayalet bir ekranda kalırız; bu yüzden koparken sıfırlayıp dönerken
+     odaya yeniden giriyoruz. */
+  net.on("close", () => {
+    room = null;
+    mySeat = -1;
+    phase = "idle";
+    stopTimer();
+    setControls(false);
+  });
+
   net.on("open", () => {
     if (me.name) net.send({ t: "rename", name: me.name });
+    if (room) return;
     const code = hashRoom();
-    if (code && !room) tryJoin(code);
+    if (!code) return;
+    if (lastJoin && lastJoin.roomId === code) {
+      pendingJoin = { roomId: code };
+      net.send({ t: "join", roomId: code, password: lastJoin.password });
+    } else {
+      tryJoin(code);
+    }
   });
 
   net.on("welcome", (m) => {
@@ -127,7 +148,20 @@
       $("jnPass").select();
       return;
     }
-    if (m.code === "gone" || m.code === "full") { pendingJoin = null; setHash(""); closeModal(); }
+    if (m.code === "gone" || m.code === "full" || m.code === "kicked") {
+      pendingJoin = null;
+      lastJoin = null;
+      lastPassword = "";
+      setHash("");
+      closeModal();
+      // Sunucu yeniden başladıysa oda artık yok; odada gibi görünen ekranda
+      // bırakmak yerine lobiye dönüyoruz.
+      if (!room) {
+        view.clear();
+        switchView(false);
+        net.send({ t: "rooms" });
+      }
+    }
     toast(m.text, true);
   });
 
@@ -217,10 +251,11 @@
   /* ---------- formlar ---------- */
   el.formCreate.addEventListener("submit", (e) => {
     e.preventDefault();
+    lastPassword = $("crPass").value;
     net.send({
       t: "create",
       name: $("crName").value,
-      password: $("crPass").value,
+      password: lastPassword,
       settings: {
         rounds: +$("crRounds").value,
         gravity: +$("crGrav").value,
@@ -236,7 +271,8 @@
   el.formJoin.addEventListener("submit", (e) => {
     e.preventDefault();
     if (!pendingJoin) return closeModal();
-    net.send({ t: "join", roomId: pendingJoin.roomId, password: $("jnPass").value });
+    lastPassword = $("jnPass").value;
+    net.send({ t: "join", roomId: pendingJoin.roomId, password: lastPassword });
   });
 
   el.formNick.addEventListener("submit", (e) => {
@@ -287,6 +323,7 @@
   net.on("joined", (m) => {
     closeModal();
     pendingJoin = null;
+    lastJoin = { roomId: m.roomId, password: lastPassword };
     setHash(m.roomId);
     el.chatLog.innerHTML = "";
     view.clear("OYUNCULAR BEKLENİYOR");
@@ -295,6 +332,7 @@
 
   net.on("left", () => {
     room = null; mySeat = -1; phase = "idle";
+    lastJoin = null; lastPassword = "";
     setHash("");
     view.clear();
     switchView(false);

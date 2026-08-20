@@ -241,6 +241,13 @@ test("iki koltuk dolunca maç başlar ve sıra dönüşümlü ilerler", async ()
   assert.strictEqual(round.turn, 0);
   assert.deepStrictEqual(round.names, ["Ali", "Ayşe"]);
 
+  // Rastgele şehirde bitişik yüksek bir bina atışı ilk karelerde durdurabiliyor;
+  // ıskayı sınamak için sahneyi bilinen boş bir düzene sabitliyoruz.
+  hub.rooms.get(id).match.state = {
+    buildings: [], craters: [], gravity: 9.8, wind: 0, sunHit: true,
+    gorillas: [{ x: 60, y: 300, dead: false }, { x: 600, y: 380, dead: false }]
+  };
+
   // sırası olmayan ateş edemez
   const before = a.all("shot").length;
   hub.handle(b.id, { t: "fire", angle: 45, velocity: 100 });
