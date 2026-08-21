@@ -1,8 +1,9 @@
 # GORILLAS ONLINE
 
 QBasic klasiği *Gorillas*'ın ağ üzerinden oynanan sürümü. Haxball mantığında
-çalışır: oda kurarsın (istersen şifreli), linki arkadaşlarına atarsın, iki kişi
-sahaya oturur, kalanlar izler ve sohbet eder.
+çalışır: oda kurarsın (istersen şifreli), linki arkadaşlarına atarsın, herkes
+kırmızı ya da mavi takıma geçer. Sahada aynı anda 4'e 4, sekiz goril olabilir;
+kalanlar izler ve sohbet eder.
 
 ```bash
 npm install && npm start
@@ -22,8 +23,16 @@ IP'sini paylaş (`http://192.168.x.x:8080`).
   (`shared/game-core.js`).
 - **Yörünge ağdan gelir, yeniden hesaplanmaz.** `Math.cos/sin` motorlar arası
   bit-eşdeğerli olmadığı için muzun kare kare konumları sunucudan gönderilir.
-- **Oda dolduğunda sıra kurulur.** İki koltuk doluysa maç başlar; maçı kazanan
-  koltuğunda kalır, kaybeden sıranın sonuna geçer, sıradaki izleyici sahaya çıkar.
+- **Takımlar serbest seçilir.** Kırmızı / Mavi / İzleyici arasında istediğin gibi
+  geçersin, maçı oda sahibi başlatır. Sıra takımlar arasında dönüşümlü ilerler;
+  bir takımın tüm gorilleri düşünce raunt biter.
+- **Zemin çökerse goril düşer.** Patlama, gorilin 24 piksellik tabanının
+  altındaki zeminin üçte ikisinden fazlasını götürürse ayakta duramaz. İki goril
+  boyundan (68 piksel) uzun düşüş öldürür; kısası öldürmez, goril yerde bir küfür
+  savurup ayağa kalkar ve oyuna devam eder.
+- **Gündüz/gece teması oda ayarıdır.** Gökyüzü, güneş/ay ve bulutlar buna göre
+  değişir. Bulutlar muzun önüne çizilir ama fizikle ilişkileri yoktur; muz
+  içlerinden geçer.
 - **Her şey bellektedir.** Hesap, veritabanı, çerez yok. Sunucu yeniden
   başlayınca odalar silinir; takma ad tarayıcıda `localStorage`'da tutulur.
 
@@ -31,8 +40,8 @@ IP'sini paylaş (`http://192.168.x.x:8080`).
 
 | Yol | İş |
 |---|---|
-| `shared/game-core.js` | Fizik, şehir üretimi, çarpışma. Hem Node hem tarayıcı yükler. |
-| `server/rooms.js` | Oda, koltuk, sıra, sohbet, maç akışı. Taşıma katmanından bağımsız. |
+| `shared/game-core.js` | Fizik, şehir ve bulut üretimi, çarpışma, düşme kuralı. Hem Node hem tarayıcı yükler. |
+| `server/rooms.js` | Oda, takım, sıra, sohbet, maç akışı. Taşıma katmanından bağımsız. |
 | `server/index.js` | HTTP statik sunucu + WebSocket, hız sınırları, sağlık ucu. |
 | `public/js/net.js` | WebSocket sarmalayıcı, otomatik yeniden bağlanma. |
 | `public/js/game.js` | Canvas çizimi ve atış canlandırması. Kural işletmez. |
@@ -45,9 +54,10 @@ IP'sini paylaş (`http://192.168.x.x:8080`).
 npm test
 ```
 
-47 test: analitik eğik atış karşılaştırması, tohum belirlenimciliği, krater
-geometrisi, şifre/yetki kontrolleri, koltuk devri, kopma senaryosu ve gerçek
-HTTP + WebSocket üzerinden iki oyunculu maç.
+64 test: analitik eğik atış karşılaştırması, tohum belirlenimciliği, krater ve
+bulut geometrisi, düşme ve ölüm eşikleri, şifre ve yetki kontrolleri, takım
+dağıtımı, raunt bitişi, kopma senaryosu ve gerçek HTTP + WebSocket üzerinden
+iki oyunculu maç.
 
 ## Ücretsiz barındırma
 
@@ -87,8 +97,9 @@ location / {
 | `HOST` | 0.0.0.0 | Dinlenen adres. |
 | `MAX_CONN_PER_IP` | 8 | Aynı adresten eşzamanlı bağlantı sınırı. |
 
-Oda başına ayarlar (raunt, yerçekimi, rüzgâr, kişi sınırı, tur süresi) arayüzden
-oda sahibi tarafından değiştirilir.
+Oda başına ayarlar (raunt, yerçekimi, rüzgâr, kişi sınırı, tur süresi, gündüz/gece
+teması) arayüzden oda sahibi tarafından değiştirilir. Sahne 960×400 pikseldir ve
+takım başına en fazla 4 oyuncu sahaya çıkar.
 
 ## Tasarım
 

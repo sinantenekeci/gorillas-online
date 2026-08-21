@@ -407,6 +407,13 @@ class Hub {
 
     m.phase = "resolving";
     this.stopTimer(room);
+
+    /* Once carpmayi uygula, sonra ayagi oyulan gorilleri dusur; ikisi de
+       ayni mesajda gider ki istemci sirayla canlandirsin. */
+    core.applyImpact(m.state, shot.impact);
+    if (shot.sunHit) m.state.sunHit = true;
+    const falls = core.settleGorillas(m.state);
+
     this.broadcast(room, {
       t: "shot",
       shooter: m.turn,
@@ -414,24 +421,29 @@ class Hub {
       velocity: velocity,
       frames: shot.frames,
       impact: shot.impact,
-      sunHit: shot.sunHit
+      sunHit: shot.sunHit,
+      falls: falls
     });
-    core.applyImpact(m.state, shot.impact);
-    if (shot.sunHit) m.state.sunHit = true;
 
     room.timer = this.setTimeout(
-      () => this.resolveShot(room, shot),
-      this.wait(core.shotDurationMs(shot))
+      () => this.resolveShot(room, shot, falls),
+      this.wait(core.shotDurationMs(shot) + core.fallDurationMs(falls))
     );
   }
 
-  resolveShot(room, shot) {
+  resolveShot(room, shot, falls) {
     if (!room.match) return;
-    const m = room.match;
     if (shot.impact.victim >= 0) {
       const victim = this.playerByGorilla(room, shot.impact.victim);
       if (victim) this.sys(room, victim.name + " vuruldu.");
     }
+    (falls || []).forEach((f) => {
+      const p = this.playerByGorilla(room, f.i);
+      if (!p) return;
+      this.sys(room, f.died
+        ? p.name + " ayagi oyulunca dustu ve kurtulamadi."
+        : p.name + " dustu ama ayaga kalkti.");
+    });
     if (this.checkRoundOver(room)) return;
     this.nextTurn(room);
   }
@@ -539,6 +551,7 @@ class Hub {
         gravity: m.state.gravity,
         craters: m.state.craters,
         dead: m.state.gorillas.map((g) => g.dead),
+        gy: m.state.gorillas.map((g) => g.y),
         red: m.state.gorillas.filter((g) => g.team === "red").length,
         blue: m.state.gorillas.filter((g) => g.team === "blue").length,
         sunHit: m.state.sunHit

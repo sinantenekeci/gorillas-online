@@ -201,3 +201,93 @@ test("her raunt en az bir bulut üretir", () => {
     assert.ok(core.createRound(seed, {}).clouds.length >= 3);
   }
 });
+
+/* ---------------- düşme ---------------- */
+function kule(x, tepe) {
+  return { x: x - 20, y: tepe, w: 40, h: core.H - tepe, color: "#A8A8A8", windows: [] };
+}
+function sahne(gorillas, buildings) {
+  return {
+    buildings: buildings, craters: [], gravity: 9.8, wind: 0,
+    sunHit: true, clouds: [], gorillas: gorillas
+  };
+}
+
+test("sağlam zemindeki goril düşmez", () => {
+  const g = { x: 100, y: 200 - core.GH, dead: false, team: "red", facing: 1 };
+  const s = sahne([g], [kule(100, 200)]);
+  assert.strictEqual(core.supportRatio(s, g), 1);
+  assert.deepStrictEqual(core.settleGorillas(s), []);
+  assert.strictEqual(g.y, 200 - core.GH, "yerinde kalmalı");
+});
+
+test("tabanın üçte birinden azı kalınca goril düşer", () => {
+  const g = { x: 100, y: 200 - core.GH, dead: false, team: "red", facing: 1 };
+  const s = sahne([g], [kule(100, 200)]);
+  core.applyImpact(s, { type: "terrain", x: 100, y: 205, victim: -1, r: 30 });
+  assert.ok(core.supportRatio(s, g) < core.SUPPORT_MIN, "destek eşiğin altına inmeli");
+  const falls = core.settleGorillas(s);
+  assert.strictEqual(falls.length, 1);
+  assert.strictEqual(falls[0].i, 0);
+  assert.ok(falls[0].dist > 0);
+  assert.strictEqual(g.y, falls[0].toY, "goril yeni konumuna taşınmalı");
+});
+
+test("kenarı oyulan ama tabanı çoğunlukla duran goril düşmez", () => {
+  const g = { x: 100, y: 200 - core.GH, dead: false, team: "red", facing: 1 };
+  const s = sahne([g], [kule(100, 200)]);
+  // yalnızca sol kenardan küçük bir ısırık
+  core.applyImpact(s, { type: "terrain", x: 82, y: 205, victim: -1, r: 8 });
+  assert.ok(core.supportRatio(s, g) >= core.SUPPORT_MIN);
+  assert.deepStrictEqual(core.settleGorillas(s), []);
+});
+
+test("iki goril boyundan kısa düşüş öldürmez, uzunu öldürür", () => {
+  // kısa düşüş: 40 px aşağıda geniş bir teras var
+  const kisa = { x: 300, y: 200 - core.GH, dead: false, team: "red", facing: 1 };
+  const s1 = sahne([kisa], [kule(300, 200), { x: 260, y: 240, w: 120, h: core.H - 240, color: "#A8A8A8", windows: [] }]);
+  core.applyImpact(s1, { type: "terrain", x: 300, y: 205, victim: -1, r: 30 });
+  const f1 = core.settleGorillas(s1);
+  assert.strictEqual(f1.length, 1);
+  assert.ok(f1[0].dist <= core.FATAL_FALL, "düşüş 68 pikseli aşmamalı: " + f1[0].dist);
+  assert.strictEqual(f1[0].died, false);
+  assert.strictEqual(kisa.dead, false, "kısa düşüşte hayatta kalmalı");
+
+  // uzun düşüş: altında hiçbir şey yok, sokağa kadar iner
+  const uzun = { x: 300, y: 120, dead: false, team: "red", facing: 1 };
+  const s2 = sahne([uzun], [{ x: 280, y: 154, w: 40, h: 6, color: "#A8A8A8", windows: [] }]);
+  core.applyImpact(s2, { type: "terrain", x: 300, y: 156, victim: -1, r: 30 });
+  const f2 = core.settleGorillas(s2);
+  assert.strictEqual(f2.length, 1);
+  assert.ok(f2[0].dist > core.FATAL_FALL, "düşüş 68 pikseli aşmalı: " + f2[0].dist);
+  assert.strictEqual(f2[0].died, true);
+  assert.strictEqual(uzun.dead, true, "uzun düşüşte ölmeli");
+});
+
+test("ölü ve sokak seviyesindeki goriller düşme hesabına girmez", () => {
+  const olu = { x: 100, y: 100, dead: true, team: "red", facing: 1 };
+  const sokakta = { x: 300, y: core.H - core.GH, dead: false, team: "blue", facing: -1 };
+  const s = sahne([olu, sokakta], []);
+  assert.deepStrictEqual(core.settleGorillas(s), []);
+});
+
+test("düşme süresi mesafeyle büyür, düşen yoksa sıfırdır", () => {
+  assert.strictEqual(core.fallDurationMs([]), 0);
+  assert.strictEqual(core.fallDurationMs(null), 0);
+  const kisa = core.fallDurationMs([{ dist: 20 }]);
+  const uzun = core.fallDurationMs([{ dist: 200 }]);
+  assert.ok(uzun > kisa, "uzun düşüş daha uzun sürmeli");
+  assert.ok(kisa >= 1400, "kalkma payı hep eklenmeli");
+});
+
+test("düşme sunucu ve istemcide aynı sonucu verir", () => {
+  const kur = () => {
+    const g = { x: 100, y: 200 - core.GH, dead: false, team: "red", facing: 1 };
+    return { s: sahne([g], [kule(100, 200)]), g: g };
+  };
+  const a = kur(), b = kur();
+  const im = { type: "terrain", x: 100, y: 205, victim: -1, r: 30 };
+  core.applyImpact(a.s, im); core.applyImpact(b.s, im);
+  assert.deepStrictEqual(core.settleGorillas(a.s), core.settleGorillas(b.s));
+  assert.strictEqual(a.g.y, b.g.y);
+});

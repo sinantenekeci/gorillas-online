@@ -237,6 +237,59 @@
     return { frames: frames, impact: impact, sunHit: sunHit };
   }
 
+  /* ---------- dusme ----------
+     Patlama gorilin ayagini oyarsa goril duser. Destek olcusu, gorilin 24
+     piksellik tabani boyunca hemen altindaki zeminin ne kadarinin hala kati
+     oldugudur; ucte birin altina inerse ayakta duramaz.
+     2 goril boyundan (68 px) yuksek dusus olumcul, kisasi degil. */
+  var SUPPORT_MIN = 1 / 3;
+  var FATAL_FALL = 2 * GH;
+  var FALL_STEP = 4;                 // istemci canlandirmasinda kare basina piksel
+
+  function supportRatio(state, g) {
+    var lo = Math.round(g.x - GW / 2), hi = Math.round(g.x + GW / 2);
+    var total = 0, firm = 0;
+    for (var x = lo; x <= hi; x++) {
+      total++;
+      if (solid(state, x, g.y + GH)) firm++;
+    }
+    return total ? firm / total : 0;
+  }
+
+  /* Zemini kaybeden gorilleri dusurur. Doner: [{i, fromY, toY, dist, died}]
+     Sunucu bunu carpmadan hemen sonra calistirir; istemci ayni listeyi
+     canlandirir, kendi hesabini yapmaz. */
+  function settleGorillas(state) {
+    var falls = [], i, g;
+    for (i = 0; i < state.gorillas.length; i++) {
+      g = state.gorillas[i];
+      if (!g || g.dead) continue;
+      if (g.y + GH >= H) continue;                   // zaten sokak seviyesinde
+      if (supportRatio(state, g) >= SUPPORT_MIN) continue;
+
+      var fromY = g.y, probe = { x: g.x, y: g.y };
+      while (probe.y + GH < H) {
+        probe.y++;
+        if (supportRatio(state, probe) >= SUPPORT_MIN) break;
+      }
+      var dist = probe.y - fromY;
+      if (dist <= 0) continue;
+      var died = dist > FATAL_FALL;
+      g.y = probe.y;
+      if (died) g.dead = true;
+      falls.push({ i: i, fromY: fromY, toY: probe.y, dist: dist, died: died });
+    }
+    return falls;
+  }
+
+  /* Dusme canlandirmasinin suresi; sunucu siradaki turu bundan once acmaz. */
+  function fallDurationMs(falls) {
+    if (!falls || !falls.length) return 0;
+    var max = 0;
+    for (var i = 0; i < falls.length; i++) if (falls[i].dist > max) max = falls[i].dist;
+    return Math.round((max / FALL_STEP) * (1000 / 60)) + 1400;   // dusus + kufur balonu + dogrulma
+  }
+
   /* Carpmanin zemine ve gorillere etkisini uygular (iki tarafta da ayni). */
   function applyImpact(state, impact) {
     if (impact.type !== "out") state.craters.push({ x: impact.x, y: impact.y, r: impact.r });
@@ -252,6 +305,10 @@
   return {
     W: W, H: H, GW: GW, GH: GH, SUN: SUN, DT: DT, SUB: SUB, BCOL: BCOL,
     CLOUD_TOP: CLOUD_TOP, CLOUD_BOTTOM: CLOUD_BOTTOM,
+    SUPPORT_MIN: SUPPORT_MIN, FATAL_FALL: FATAL_FALL, FALL_STEP: FALL_STEP,
+    supportRatio: supportRatio,
+    settleGorillas: settleGorillas,
+    fallDurationMs: fallDurationMs,
     pickSlots: pickSlots,
     facingOf: facingOf,
     mulberry32: mulberry32,

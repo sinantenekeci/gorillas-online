@@ -72,8 +72,14 @@ function sahneyiSabitle(hub, id, gorilSayisi) {
       facing: room.match.state.gorillas[i].facing
     });
   }
+  /* Her gorilin altina tam destek veren bir kule koyuyoruz: aksi halde
+     hepsi bosluktadir ve yeni dusme kurali devreye girer. */
+  const buildings = gorillas.map((g) => ({
+    x: g.x - 20, y: g.y + 34, w: 40, h: 400 - (g.y + 34),
+    color: "#A8A8A8", windows: []
+  }));
   room.match.state = {
-    buildings: [], craters: [], gravity: 0, wind: 0, sunHit: true,
+    buildings: buildings, craters: [], gravity: 0, wind: 0, sunHit: true,
     clouds: [], gorillas: gorillas
   };
   return room;

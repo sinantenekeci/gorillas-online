@@ -151,10 +151,14 @@ test("iki oyuncu odada buluşur, yazışır ve maçı oynar", async () => {
 
   // rastgele harita testi kırılgan yapmasın: sahneyi bilinen boş bir düzene sabitliyoruz
   hub.rooms.get(roomId).match.state = {
-    buildings: [], craters: [], gravity: 9.8, wind: 0, sunHit: true, clouds: [],
+    buildings: [
+      { x: 40, y: 334, w: 40, h: 66, color: "#A8A8A8", windows: [] },
+      { x: 880, y: 334, w: 40, h: 66, color: "#A8A8A8", windows: [] }
+    ],
+    craters: [], gravity: 9.8, wind: 0, sunHit: true, clouds: [],
     gorillas: [
       { x: 60, y: 300, dead: false, team: "red", facing: 1 },
-      { x: 900, y: 380, dead: false, team: "blue", facing: -1 }
+      { x: 900, y: 300, dead: false, team: "blue", facing: -1 }
     ]
   };
 
@@ -239,4 +243,47 @@ test("bozuk veri bağlantıyı düşürmez", async () => {
   const list = await a.wait("rooms");
   assert.ok(Array.isArray(list.rooms), "bağlantı hâlâ çalışıyor olmalı");
   await a.close();
+});
+
+test("ayağı oyulan goril düşer ve bu atış mesajıyla bildirilir", async () => {
+  const a = await connect("Kazici");
+  await a.wait("welcome");
+  a.send({ t: "create", name: "Dusme Odasi", settings: { rounds: 1, turnSeconds: 120 } });
+  const roomId = (await a.wait("joined")).roomId;
+
+  const b = await connect("Hedef");
+  await b.wait("welcome");
+  b.send({ t: "join", roomId: roomId });
+  await b.wait("joined");
+  a.send({ t: "start" });
+  await a.wait("round", 6000);
+
+  /* Sahne sabitleniyor: mavi goril ince bir kulenin tepesinde. Kırmızı,
+     kulenin gövdesine yatay atış yapıyor; patlama tabanın çoğunu götürüyor.
+     Yerçekimi sıfır ki muz düz gitsin ve nereye çarpacağı kesin olsun. */
+  const st = hub.rooms.get(roomId).match.state;
+  st.buildings = [
+    { x: 40, y: 202, w: 60, h: 198, color: "#A8A8A8", windows: [] },   // atıcının altı
+    { x: 470, y: 150, w: 30, h: 250, color: "#A8A8A8", windows: [] }   // hedefin ince kulesi
+  ];
+  st.craters = [];
+  st.gravity = 0;
+  st.wind = 0;
+  st.gorillas[0].x = 60;  st.gorillas[0].y = 168;   // namlu y = 160
+  st.gorillas[1].x = 485; st.gorillas[1].y = 116;   // ayakları y = 150
+
+  a.send({ t: "fire", angle: 0, velocity: 120 });
+
+  const shot = await a.wait("shot");
+  const shot2 = await b.wait("shot");
+  assert.strictEqual(shot.impact.type, "terrain", "muz kuleye çarpmalı");
+  assert.ok(Array.isArray(shot.falls), "atış mesajı düşme listesi taşımalı");
+  assert.deepStrictEqual(shot.falls, shot2.falls, "iki istemci aynı düşmeyi görmeli");
+  assert.strictEqual(shot.falls.length, 1, "yalnızca hedef düşmeli");
+  assert.strictEqual(shot.falls[0].i, 1);
+  assert.ok(shot.falls[0].dist > 0);
+  assert.ok(shot.falls[0].toY > shot.falls[0].fromY);
+
+  await a.close();
+  await b.close();
 });

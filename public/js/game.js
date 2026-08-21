@@ -39,6 +39,8 @@
   };
   const SURPRISE_MS = 5000;
   const TEAM_BODY = { red: "#D04040", blue: "#4878E0" };
+  const CURSE = "$#@%";
+  const BUBBLE_FRAMES = 60;          // kufur balonu ~1 saniye
   const TEAM_TEXT = { red: "#FF9A9A", blue: "#A8C4FF" };
 
   const SPRITE = [
@@ -106,6 +108,10 @@
     this.ban = null;            // {frames, i}
     this.boom = null;
     this.dance = null;
+    this.falls = null;          // {list, ...} dusme canlandirmasi
+    this.lying = {};            // i -> goril yatay duruyor
+    this.xeyes = {};            // i -> olu, gozler x x
+    this.bubble = {};           // i -> kufur balonu goruniyor
     this.idleText = "ODA HAZIR";
     this.onShotDone = null;
 
@@ -137,6 +143,7 @@
     this.turn = typeof msg.turn === "number" ? msg.turn : -1;
     this.arms = this.state.gorillas.map(() => 0);
     this.ban = null; this.boom = null; this.dance = null; this.aim = null;
+    this.falls = null; this.lying = {}; this.xeyes = {}; this.bubble = {};
     this.drawCity();
   };
 
@@ -144,6 +151,7 @@
   GameView.prototype.applySnapshot = function (m) {
     if (!this.state) return;
     (m.craters || []).forEach((c) => this.state.craters.push(c));
+    (m.gy || []).forEach((y, i) => { if (this.state.gorillas[i]) this.state.gorillas[i].y = y; });
     (m.dead || []).forEach((d, i) => { if (d && this.state.gorillas[i]) this.state.gorillas[i].dead = true; });
     this.state.sunHit = !!m.sunHit;
     if (m.scores) this.scores = { red: m.scores.red, blue: m.scores.blue };
@@ -155,6 +163,7 @@
   GameView.prototype.clear = function (text) {
     this.state = null;
     this.ban = null; this.boom = null; this.dance = null; this.aim = null;
+    this.falls = null; this.lying = {}; this.xeyes = {}; this.bubble = {};
     this.players = [];
     this.idleText = text || "OYUNCULAR BEKLENİYOR";
   };
@@ -203,9 +212,17 @@
     c.restore();
   };
 
-  GameView.prototype.drawGorilla = function (g, arms, name) {
+  GameView.prototype.drawGorilla = function (g, arms, name, opts) {
     const ctx = this.ctx, px = 2, ox = g.x - GW / 2, oy = g.y;
     const body = TEAM_BODY[g.team] || "#A85400";
+    opts = opts || {};
+    if (opts.lying) {
+      // dusen goril yan yatar; ayaga kalkinca bu donusum kalkar
+      ctx.save();
+      ctx.translate(g.x, oy + GH / 2);
+      ctx.rotate(Math.PI / 2 * ((g.facing || 1) > 0 ? 1 : -1));
+      ctx.translate(-g.x, -(oy + GH / 2));
+    }
     for (let r = 0; r < SPRITE.length; r++) {
       for (let col = 0; col < 12; col++) {
         const ch = SPRITE[r][col];
@@ -219,6 +236,18 @@
     ctx.fillRect(ox, oy + (left ? 4 : 16), px * 2, px * 6);
     ctx.fillRect(ox + px * 10, oy + (right ? 4 : 16), px * 2, px * 6);
 
+    if (opts.xeyes) {
+      ctx.strokeStyle = "#000"; ctx.lineWidth = 2; ctx.lineCap = "butt";
+      [3, 8].forEach(function (col) {
+        const ex = ox + col * px, ey = oy + 4 * px;
+        ctx.beginPath();
+        ctx.moveTo(ex - 1, ey - 1); ctx.lineTo(ex + 3, ey + 3);
+        ctx.moveTo(ex + 3, ey - 1); ctx.lineTo(ex - 1, ey + 3);
+        ctx.stroke();
+      });
+    }
+    if (opts.lying) ctx.restore();
+
     if (name) {
       ctx.font = "bold 9px 'Courier New',monospace";
       ctx.textAlign = "center";
@@ -231,6 +260,21 @@
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
     }
+  };
+
+  /* Duserken cikan kufur balonu; 1 saniye sonra kayboluyor. */
+  GameView.prototype.drawBubble = function (x, y, text) {
+    const ctx = this.ctx;
+    ctx.font = "bold 10px 'Courier New',monospace";
+    const w = Math.round(ctx.measureText(text).width) + 10, h = 16;
+    const bx = Math.round(x - w / 2), by = Math.round(y - h - 6);
+    ctx.fillStyle = "#FCFCFC";
+    ctx.fillRect(bx, by, w, h);
+    ctx.fillRect(Math.round(x) - 3, by + h, 6, 5);
+    ctx.fillStyle = "#000";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(text, Math.round(x), by + h / 2);
+    ctx.textAlign = "left"; ctx.textBaseline = "top";
   };
 
   GameView.prototype.drawCelestial = function () {
@@ -363,7 +407,12 @@
     ctx.drawImage(this.city, 0, 0);
     for (let i = 0; i < this.state.gorillas.length; i++) {
       const g = this.state.gorillas[i];
-      if (g && !g.dead) this.drawGorilla(g, this.arms[i] || 0, this.nameOfGorilla(i));
+      if (!g) continue;
+      // muzla patlayan goril yok olur; dusup olen ise yerde yatarak kalir
+      if (g.dead && !this.xeyes[i]) continue;
+      this.drawGorilla(g, this.arms[i] || 0, this.xeyes[i] ? "" : this.nameOfGorilla(i),
+        { lying: !!this.lying[i], xeyes: !!this.xeyes[i] });
+      if (this.bubble[i]) this.drawBubble(g.x, g.y, CURSE);
     }
     if (!this.ban && !this.boom) this.drawAim();
     if (this.ban) {
@@ -382,6 +431,7 @@
     const facing = core.facingOf(this.state, msg.shooter);
     this.arms[msg.shooter] = facing > 0 ? 2 : 1;
     this.ban = { frames: msg.frames, i: 0, impact: msg.impact, sunHit: msg.sunHit, sunPlayed: false };
+    this.pendingFalls = (msg.falls || []).slice();
     this.onShotDone = done || null;
     this.sound.tone(320, 620, 0.12, "square", 0.05);
   };
@@ -401,7 +451,7 @@
     if (b.i >= b.frames.length - 1) {
       const im = b.impact;
       this.ban = null;
-      if (im.type === "out") { this.finishShot(); return; }
+      if (im.type === "out") { this.beginFalls(); return; }
       // isabet ya da kıl payı kaçan atış güneşi/ayı da şaşırtır
       if (im.victim >= 0 || this.nearGorilla(im.x, im.y, im.victim)) this.surprise();
       this.boom = { x: im.x, y: im.y, r: 1, max: im.r, phase: 0, victim: im.victim };
@@ -434,8 +484,53 @@
       }
     } else {
       b.r -= 2.5 * dtFrames;
-      if (b.r <= 0) { this.boom = null; this.finishShot(); }
+      if (b.r <= 0) { this.boom = null; this.beginFalls(); }
     }
+  };
+
+  /* Sunucunun bildirdigi dusmeleri sirayla canlandirir; istemci kendi
+     fizik hesabini yapmaz, yalnizca gelen listeyi oynatir. */
+  GameView.prototype.beginFalls = function () {
+    const list = (this.pendingFalls || []).filter((f) => this.state.gorillas[f.i]);
+    this.pendingFalls = null;
+    if (!list.length) { this.finishShot(); return; }
+    this.falls = list.map((f) => ({
+      i: f.i, toY: f.toY, died: f.died, y: f.fromY, phase: "drop", t: 0
+    }));
+    this.falls.forEach((f) => { this.state.gorillas[f.i].y = f.y; });
+  };
+
+  GameView.prototype.stepFalls = function (dtFrames) {
+    let calisan = 0;
+    for (const f of this.falls) {
+      const g = this.state.gorillas[f.i];
+      if (f.phase === "drop") {
+        calisan++;
+        f.y += core.FALL_STEP * dtFrames;
+        if (f.y >= f.toY) {
+          f.y = f.toY;
+          f.phase = "land"; f.t = 0;
+          this.lying[f.i] = true;
+          this.bubble[f.i] = true;
+          this.sound.tone(180, 70, 0.18, "square", 0.07);
+        }
+        g.y = Math.round(f.y);
+      } else if (f.phase === "land") {
+        calisan++;
+        f.t += dtFrames;
+        if (f.t > BUBBLE_FRAMES) {
+          this.bubble[f.i] = false;
+          if (f.died) {
+            this.xeyes[f.i] = true;      // yatarak kalir, gozler x x
+            g.dead = true;
+          } else {
+            this.lying[f.i] = false;     // ayaga kalkip atisa devam eder
+          }
+          f.phase = "done";
+        }
+      }
+    }
+    if (!calisan) { this.falls = null; this.finishShot(); }
   };
 
   GameView.prototype.finishShot = function () {
@@ -471,6 +566,7 @@
     if (this.state) {
       if (this.ban) this.stepFlight(dtFrames);
       else if (this.boom) this.stepBoom(dtFrames);
+      else if (this.falls) this.stepFalls(dtFrames);
       else if (this.dance) this.stepDance(dtFrames);
     }
     this.render();
