@@ -430,3 +430,25 @@ test("maç başlarken oda durumu dolu match ile yayınlanır", async () => {
   assert.ok(typeof st.match.seed === "number");
   assert.strictEqual(st.seats[1], b.id);
 });
+
+/* ---------------- tema ---------------- */
+test("tema ayarı doğrulanır, tanınmayan değer gündüze düşer", () => {
+  assert.strictEqual(normalizeSettings({}).theme, "day");
+  assert.strictEqual(normalizeSettings({ theme: "night" }).theme, "night");
+  assert.strictEqual(normalizeSettings({ theme: "kozmik" }).theme, "day");
+  assert.strictEqual(normalizeSettings({ theme: 42 }).theme, "day");
+});
+
+test("raunt mesajı temayı taşır, herkes aynı gökyüzünü çizer", async () => {
+  const hub = mkHub(100);
+  const a = mkClient(hub, "Ali");
+  hub.handle(a.id, { t: "create", name: "Gece Odası", settings: { theme: "night", turnSeconds: 120 } });
+  const id = a.last("joined").roomId;
+  const b = mkClient(hub, "Ayşe");
+  hub.handle(b.id, { t: "join", roomId: id });
+
+  assert.ok(await until(() => a.last("round"), 3000), "raunt başlamalı");
+  assert.strictEqual(a.last("round").theme, "night");
+  assert.strictEqual(b.last("round").theme, "night");
+  assert.strictEqual(b.last("roomState").settings.theme, "night");
+});

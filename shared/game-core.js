@@ -62,6 +62,48 @@
     });
   }
 
+  /* ---------- bulutlar ----------
+     Yalnızca görsel; fizikle ilişkisi yok, muz içlerinden geçer.
+     Şehir akışından ayrı bir rastgelelik dizisi kullanır: rüzgâr kapalıyken
+     bir rastgele çekim atlandığı için aynı diziyi paylaşsalardı bulutlar
+     istemciler arasında kayabilirdi.
+     Y aralığı, en yüksek binanın tepesinin (y=141) ve üstündeki gorilin
+     (y=107) üzerinde kalacak biçimde sınırlıdır; böylece bulutlar muzun
+     önüne çizilse de binaları ve gorilleri kapatmaz. */
+  var CLOUD_TOP = 34, CLOUD_BOTTOM = 100;
+
+  function makeClouds(seed) {
+    var rnd = mulberry32((seed ^ 0x9E3779B9) >>> 0);
+    var clouds = [], n = 3 + Math.floor(rnd() * 3), i, j;
+    for (i = 0; i < n; i++) {
+      /* Bulut silueti: altta tam boy bir taban, üstünde 2-3 tümsek.
+         Tek sıra dikdörtgen düz bir çubuk gibi görünüyordu. */
+      var width = 44 + Math.round(rnd() * 52);
+      var puffs = [{ dx: 0, dy: 10, w: width, h: 8 }];
+      var m = 2 + Math.floor(rnd() * 2);
+      for (j = 0; j < m; j++) {
+        var bw = 16 + Math.round(rnd() * 14);
+        var bx = Math.round(4 + j * ((width - bw - 8) / m) + rnd() * 6);
+        puffs.push({
+          dx: Math.max(0, Math.min(bx, width - bw)),
+          dy: Math.round(rnd() * 4),
+          w: bw,
+          h: 12 + Math.round(rnd() * 6)
+        });
+      }
+      var maxY = CLOUD_BOTTOM - 20;                 // puf alt kenarı en fazla y + 18
+      var y = Math.round(CLOUD_TOP + rnd() * Math.max(1, maxY - CLOUD_TOP));
+      var maxX = Math.max(8, W - width - 4);
+      var x = 4 + Math.round(rnd() * (maxX - 4));
+      // güneşin/ayın yüzünü kapatmasın: çakışıyorsa sahnenin öbür yarısına kaydır
+      if (y < SUN.y + SUN.r + 14 && x < SUN.x + SUN.r + 20 && x + width > SUN.x - SUN.r - 20) {
+        x = 4 + ((x + Math.round(W / 2)) % (maxX - 4));
+      }
+      clouds.push({ x: x, y: y, puffs: puffs, pale: rnd() > 0.5 });
+    }
+    return clouds;
+  }
+
   /* ---------- raunt durumu ---------- */
   function createRound(seed, opts) {
     opts = opts || {};
@@ -74,6 +116,7 @@
       buildings: buildings,
       gorillas: gorillas,
       craters: [],
+      clouds: makeClouds(seed),
       wind: windOn ? rnd() * 8 - 4 : 0,
       gravity: typeof opts.gravity === "number" ? opts.gravity : 9.8,
       sunHit: false
@@ -167,9 +210,11 @@
 
   return {
     W: W, H: H, GW: GW, GH: GH, SUN: SUN, DT: DT, SUB: SUB, BCOL: BCOL,
+    CLOUD_TOP: CLOUD_TOP, CLOUD_BOTTOM: CLOUD_BOTTOM,
     mulberry32: mulberry32,
     makeSeed: makeSeed,
     makeCity: makeCity,
+    makeClouds: makeClouds,
     placeGorillas: placeGorillas,
     createRound: createRound,
     solid: solid,

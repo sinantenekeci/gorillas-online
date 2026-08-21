@@ -20,7 +20,8 @@ const DEFAULTS = {
   gravity: 9.8,
   windOn: true,
   maxPlayers: 8,
-  turnSeconds: 30
+  turnSeconds: 30,
+  theme: "day"
 };
 
 function clean(str, max) {
@@ -62,7 +63,8 @@ function normalizeSettings(raw) {
     gravity: [1.6, 9.8, 24.8].indexOf(grav) >= 0 ? grav : DEFAULTS.gravity,
     windOn: raw.windOn !== false && raw.windOn !== 0 && raw.windOn !== "0",
     maxPlayers: clamp(Math.round(raw.maxPlayers), 2, 16, DEFAULTS.maxPlayers),
-    turnSeconds: clamp(Math.round(raw.turnSeconds), 10, 120, DEFAULTS.turnSeconds)
+    turnSeconds: clamp(Math.round(raw.turnSeconds), 10, 120, DEFAULTS.turnSeconds),
+    theme: raw.theme === "night" ? "night" : "day"
   };
 }
 
@@ -318,6 +320,7 @@ class Hub {
       seed: m.state.seed,
       wind: m.state.wind,
       gravity: m.state.gravity,
+      theme: room.settings.theme,
       round: m.round,
       totalRounds: m.totalRounds,
       scores: m.scores,

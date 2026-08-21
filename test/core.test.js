@@ -164,3 +164,40 @@ test("atış süresi kare sayısıyla orantılıdır", () => {
   const shot = { frames: new Array(120) };
   assert.strictEqual(core.shotDurationMs(shot), Math.round(120 * (1000 / 60)) + 900);
 });
+
+/* ---------------- bulutlar (gündüz teması) ---------------- */
+test("bulutlar tohumdan belirlenimci üretilir", () => {
+  assert.deepStrictEqual(core.makeClouds(3141), core.makeClouds(3141));
+  assert.notDeepStrictEqual(core.makeClouds(1), core.makeClouds(2));
+});
+
+/* Rüzgâr kapalıyken şehir akışında bir rastgele çekim atlanıyor; bulutlar
+   o akışı paylaşsaydı iki istemci farklı bulut görürdü. */
+test("bulutlar rüzgâr ayarından etkilenmez", () => {
+  const a = core.createRound(555, { gravity: 9.8, windOn: true });
+  const b = core.createRound(555, { gravity: 9.8, windOn: false });
+  assert.deepStrictEqual(a.clouds, b.clouds);
+});
+
+test("bulutlar bina ve goril tepelerinin üstünde kalır", () => {
+  for (let seed = 0; seed < 60; seed++) {
+    const s = core.createRound(seed, { gravity: 9.8, windOn: true });
+    const enYuksekGoril = Math.min.apply(null, s.gorillas.map((g) => g.y));
+    for (const c of s.clouds) {
+      for (const f of c.puffs) {
+        const alt = c.y + f.dy + f.h;
+        assert.ok(alt <= core.CLOUD_BOTTOM,
+          "bulut alt kenarı " + alt + " sınırı (" + core.CLOUD_BOTTOM + ") aşmamalı");
+        assert.ok(alt < enYuksekGoril,
+          "bulut (" + alt + ") en yüksek gorilin (" + enYuksekGoril + ") üstünde kalmalı");
+        assert.ok(c.x + f.dx >= 0 && c.x + f.dx + f.w <= core.W, "bulut sahne dışına taşmamalı");
+      }
+    }
+  }
+});
+
+test("her raunt en az bir bulut üretir", () => {
+  for (let seed = 0; seed < 20; seed++) {
+    assert.ok(core.createRound(seed, {}).clouds.length >= 3);
+  }
+});

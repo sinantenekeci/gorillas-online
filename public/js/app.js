@@ -261,7 +261,8 @@
         gravity: +$("crGrav").value,
         windOn: $("crWind").value === "1",
         maxPlayers: +$("crMax").value,
-        turnSeconds: +$("crTurn").value
+        turnSeconds: +$("crTurn").value,
+        theme: $("crTheme").value
       }
     });
     $("crPass").value = "";
@@ -294,7 +295,8 @@
         gravity: +$("stGrav").value,
         windOn: $("stWind").value === "1",
         maxPlayers: +$("stMax").value,
-        turnSeconds: +$("stTurn").value
+        turnSeconds: +$("stTurn").value,
+        theme: $("stTheme").value
       }
     });
     closeModal();
@@ -314,6 +316,7 @@
     $("stGrav").value = String(room.settings.gravity);
     $("stWind").value = room.settings.windOn ? "1" : "0";
     $("stMax").value = room.settings.maxPlayers;
+    $("stTheme").value = room.settings.theme || "day";
     $("stTurn").value = room.settings.turnSeconds;
     $("stTurnV").textContent = room.settings.turnSeconds;
     openModal(el.formSettings, "ODA AYARLARI");
@@ -341,6 +344,7 @@
 
   net.on("roomState", (m) => {
     room = m;
+    view.setTheme(m.settings.theme);
     mySeat = m.seats.indexOf(me.id);
     renderRoom();
     if (m.match && !view.state) {
@@ -502,7 +506,7 @@
     view.setRound({
       seed: m.seed, wind: m.wind, gravity: m.gravity,
       round: m.round, totalRounds: m.totalRounds,
-      scores: m.scores, turn: m.turn, names: m.names
+      scores: m.scores, turn: m.turn, names: m.names, theme: m.theme
     });
     // Maç sunucuda "round" ile başlar; oda durumu ayrıca gelmediği için
     // yerel maç kaydını burada kuruyoruz, yoksa sıra hiç açılmıyor.
