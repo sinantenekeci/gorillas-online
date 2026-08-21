@@ -18,6 +18,8 @@
       cloud: "#FCFCFC",
       cloudShade: "#D6DEE8",
       hud: "#0A1A3A",
+      label: "#0A1A3A",
+      teamHud: { red: "#8B1A1A", blue: "#12358C" },
       aim: "10,26,58",
       idle: "#0A1A3A"
     },
@@ -29,11 +31,15 @@
       cloud: "#3A4468",
       cloudShade: "#2A3252",
       hud: "#FCFCFC",
+      label: "#000000",
+      teamHud: { red: "#FCA5A5", blue: "#A8C4FF" },
       aim: "252,252,84",
       idle: "#6A7290"
     }
   };
   const SURPRISE_MS = 5000;
+  const TEAM_BODY = { red: "#D04040", blue: "#4878E0" };
+  const TEAM_TEXT = { red: "#FF9A9A", blue: "#A8C4FF" };
 
   const SPRITE = [
     "....BBBB....", "...BBBBBB...", "..BBBBBBBB..", "..BBBBBBBB..",
@@ -91,44 +97,46 @@
     this.state = null;          // core round state
     this.theme = "day";
     this.surprisedUntil = 0;    // güneş/ay şaşkın suratının biteceği an
-    this.names = ["—", "—"];
-    this.scores = [0, 0];
+    this.players = [];          // [{id, name, team, gorilla}]
+    this.scores = { red: 0, blue: 0 };
     this.round = 0; this.totalRounds = 0;
-    this.turn = 0;
-    this.arms = [0, 0];
-    this.aim = null;            // {seat, angle, velocity}
-    this.ban = null;            // {frames, i, rot}
+    this.turn = -1;             // sırası gelen gorilin indeksi
+    this.arms = [];
+    this.aim = null;            // {shooter, angle, velocity}
+    this.ban = null;            // {frames, i}
     this.boom = null;
     this.dance = null;
     this.idleText = "ODA HAZIR";
     this.onShotDone = null;
 
-    this._raf = 0;
     this._last = 0;
     this.loop = this.loop.bind(this);
     requestAnimationFrame(this.loop);
   }
 
   GameView.prototype.setSound = function (on) { this.sound.on = !!on; if (on) this.sound.ac(); };
+  GameView.prototype.pal = function () { return THEME[this.theme] || THEME.day; };
+  GameView.prototype.setTheme = function (theme) { this.theme = (theme === "night") ? "night" : "day"; };
+
+  /* Şaşkın surat kalıcı değil: 5 saniye sonra kendiliğinden normale döner. */
+  GameView.prototype.surprise = function () { this.surprisedUntil = Date.now() + SURPRISE_MS; };
 
   /* Sunucudan gelen raunt bilgisini yerelde yeniden kurar. */
-  GameView.prototype.setTheme = function (theme) {
-    this.theme = (theme === "night") ? "night" : "day";
-  };
-
   GameView.prototype.setRound = function (msg) {
-    this.state = core.createRound(msg.seed, { gravity: msg.gravity, windOn: true });
+    this.state = core.createRound(msg.seed, {
+      gravity: msg.gravity, windOn: true,
+      red: msg.red, blue: msg.blue
+    });
     this.state.wind = msg.wind;               // rüzgâr sunucunun değeriyle sabitlenir
     this.state.gravity = msg.gravity;
     if (msg.theme) this.setTheme(msg.theme);
     this.surprisedUntil = 0;
     this.round = msg.round; this.totalRounds = msg.totalRounds;
-    if (msg.scores) this.scores = msg.scores.slice();
-    if (msg.names) this.names = msg.names.slice();
-    this.turn = msg.turn;
-    this.arms = [0, 0];
-    this.ban = null; this.boom = null; this.dance = null;
-    this.aim = null;
+    if (msg.scores) this.scores = { red: msg.scores.red, blue: msg.scores.blue };
+    if (msg.players) this.players = msg.players.slice();
+    this.turn = typeof msg.turn === "number" ? msg.turn : -1;
+    this.arms = this.state.gorillas.map(() => 0);
+    this.ban = null; this.boom = null; this.dance = null; this.aim = null;
     this.drawCity();
   };
 
@@ -138,7 +146,8 @@
     (m.craters || []).forEach((c) => this.state.craters.push(c));
     (m.dead || []).forEach((d, i) => { if (d && this.state.gorillas[i]) this.state.gorillas[i].dead = true; });
     this.state.sunHit = !!m.sunHit;
-    this.scores = (m.scores || [0, 0]).slice();
+    if (m.scores) this.scores = { red: m.scores.red, blue: m.scores.blue };
+    if (m.players) this.players = m.players.slice();
     this.round = m.round; this.totalRounds = m.totalRounds; this.turn = m.turn;
     this.drawCity();
   };
@@ -146,17 +155,23 @@
   GameView.prototype.clear = function (text) {
     this.state = null;
     this.ban = null; this.boom = null; this.dance = null; this.aim = null;
+    this.players = [];
     this.idleText = text || "OYUNCULAR BEKLENİYOR";
   };
 
   GameView.prototype.setTurn = function (turn) {
     this.turn = turn;
-    this.arms = [0, 0];
+    this.arms = this.arms.map(() => 0);
     this.aim = null;
   };
 
-  GameView.prototype.setAim = function (seat, angle, velocity) {
-    this.aim = { seat: seat, angle: angle, velocity: velocity };
+  GameView.prototype.setAim = function (shooter, angle, velocity) {
+    this.aim = { shooter: shooter, angle: angle, velocity: velocity };
+  };
+
+  GameView.prototype.nameOfGorilla = function (i) {
+    const p = this.players.find((x) => x.gorilla === i);
+    return p ? p.name : "";
   };
 
   /* ---------- çizim ---------- */
@@ -188,27 +203,34 @@
     c.restore();
   };
 
-  GameView.prototype.drawGorilla = function (g, arms) {
+  GameView.prototype.drawGorilla = function (g, arms, name) {
     const ctx = this.ctx, px = 2, ox = g.x - GW / 2, oy = g.y;
+    const body = TEAM_BODY[g.team] || "#A85400";
     for (let r = 0; r < SPRITE.length; r++) {
       for (let col = 0; col < 12; col++) {
         const ch = SPRITE[r][col];
         if (ch === ".") continue;
-        ctx.fillStyle = (ch === "E") ? "#FCFCFC" : "#A85400";
+        ctx.fillStyle = (ch === "E") ? "#FCFCFC" : body;
         ctx.fillRect(ox + col * px, oy + r * px, px, px);
       }
     }
-    ctx.fillStyle = "#A85400";
+    ctx.fillStyle = body;
     const left = (arms === 1 || arms === 3), right = (arms === 2 || arms === 3);
     ctx.fillRect(ox, oy + (left ? 4 : 16), px * 2, px * 6);
     ctx.fillRect(ox + px * 10, oy + (right ? 4 : 16), px * 2, px * 6);
-  };
 
-  GameView.prototype.pal = function () { return THEME[this.theme] || THEME.day; };
-
-  /* Şaşkın surat kalıcı değil: 5 saniye sonra kendiliğinden normale döner. */
-  GameView.prototype.surprise = function () {
-    this.surprisedUntil = Date.now() + SURPRISE_MS;
+    if (name) {
+      ctx.font = "bold 9px 'Courier New',monospace";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = this.pal().label;      // kalabalık sahnede okunurluk için kontur
+      ctx.strokeText(name, g.x, oy - 4);
+      ctx.fillStyle = TEAM_TEXT[g.team] || "#FCFCFC";
+      ctx.fillText(name, g.x, oy - 4);
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+    }
   };
 
   GameView.prototype.drawCelestial = function () {
@@ -229,7 +251,6 @@
     ctx.beginPath(); ctx.arc(SUN.x, SUN.y, SUN.r, 0, Math.PI * 2); ctx.fill();
 
     if (this.theme === "night") {
-      // dolunay lekeleri
       ctx.fillStyle = p.celestialRay;
       ctx.beginPath(); ctx.arc(SUN.x - 5, SUN.y - 4, 2.5, 0, Math.PI * 2); ctx.fill();
       ctx.beginPath(); ctx.arc(SUN.x + 4, SUN.y + 3, 3.5, 0, Math.PI * 2); ctx.fill();
@@ -272,15 +293,16 @@
 
   GameView.prototype.drawAim = function () {
     const a0 = this.aim;
-    if (!a0 || a0.seat !== this.turn) return;
-    const g = this.state.gorillas[a0.seat];
+    if (!a0 || a0.shooter !== this.turn) return;
+    const g = this.state.gorillas[a0.shooter];
     if (!g || g.dead) return;
     const ctx = this.ctx;
-    const a = (a0.seat === 0 ? +a0.angle : 180 - (+a0.angle)) * Math.PI / 180;
+    const facing = core.facingOf(this.state, a0.shooter);
+    const a = (facing > 0 ? +a0.angle : 180 - (+a0.angle)) * Math.PI / 180;
     const v = Math.max(1, +a0.velocity);
     const vx = v * Math.cos(a), vy = v * Math.sin(a);
     const w = this.state.wind, G = this.state.gravity;
-    const m = core.muzzle(this.state, a0.seat);
+    const m = core.muzzle(this.state, a0.shooter);
     let px = m.x, py = m.y, run = 0, dots = 0, t = 0;
     while (dots < 6 && t < 12) {
       t += 0.004;
@@ -298,16 +320,17 @@
   };
 
   /* Raunt yazısı ve rüzgâr oku sahneden kaldırıldı: ikisi de canvas'ın hemen
-     üstündeki skor şeridinde yazıyor, sahnede tekrar etmeleri gereksizdi. */
+     üstündeki skor şeridinde yazıyor. Sahnede yalnızca takım skorları kalır. */
   GameView.prototype.drawHud = function () {
     const ctx = this.ctx;
     ctx.font = "bold 12px 'Courier New',monospace";
     ctx.textBaseline = "top";
-    ctx.fillStyle = this.pal().hud;
     ctx.textAlign = "left";
-    ctx.fillText(this.names[0] + ": " + this.scores[0], 6, 6);
+    ctx.fillStyle = this.pal().teamHud.red;
+    ctx.fillText("KIRMIZI: " + this.scores.red, 6, 6);
     ctx.textAlign = "right";
-    ctx.fillText(this.names[1] + ": " + this.scores[1], W - 6, 6);
+    ctx.fillStyle = this.pal().teamHud.blue;
+    ctx.fillText("MAVİ: " + this.scores.blue, W - 6, 6);
     ctx.textAlign = "left";
   };
 
@@ -338,9 +361,9 @@
     ctx.fillRect(0, 0, W, H);
     this.drawCelestial();
     ctx.drawImage(this.city, 0, 0);
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < this.state.gorillas.length; i++) {
       const g = this.state.gorillas[i];
-      if (g && !g.dead) this.drawGorilla(g, this.arms[i]);
+      if (g && !g.dead) this.drawGorilla(g, this.arms[i] || 0, this.nameOfGorilla(i));
     }
     if (!this.ban && !this.boom) this.drawAim();
     if (this.ban) {
@@ -356,7 +379,8 @@
   GameView.prototype.playShot = function (msg, done) {
     if (!this.state) { if (done) done(); return; }
     this.aim = null;
-    this.arms[msg.seat] = msg.seat === 0 ? 2 : 1;
+    const facing = core.facingOf(this.state, msg.shooter);
+    this.arms[msg.shooter] = facing > 0 ? 2 : 1;
     this.ban = { frames: msg.frames, i: 0, impact: msg.impact, sunHit: msg.sunHit, sunPlayed: false };
     this.onShotDone = done || null;
     this.sound.tone(320, 620, 0.12, "square", 0.05);
@@ -378,7 +402,7 @@
       const im = b.impact;
       this.ban = null;
       if (im.type === "out") { this.finishShot(); return; }
-      // isabet ya da kıl payı kaçan atış güneşi/ayı de şaşırtır
+      // isabet ya da kıl payı kaçan atış güneşi/ayı da şaşırtır
       if (im.victim >= 0 || this.nearGorilla(im.x, im.y, im.victim)) this.surprise();
       this.boom = { x: im.x, y: im.y, r: 1, max: im.r, phase: 0, victim: im.victim };
       this.sound.blast();
@@ -406,7 +430,7 @@
         b.r = b.max; b.phase = 1;
         this.punchCrater({ x: b.x, y: b.y, r: b.max });
         this.state.craters.push({ x: b.x, y: b.y, r: b.max });
-        if (b.victim >= 0) this.state.gorillas[b.victim].dead = true;
+        if (b.victim >= 0 && this.state.gorillas[b.victim]) this.state.gorillas[b.victim].dead = true;
       }
     } else {
       b.r -= 2.5 * dtFrames;
@@ -415,24 +439,28 @@
   };
 
   GameView.prototype.finishShot = function () {
-    this.arms = [0, 0];
+    this.arms = this.arms.map(() => 0);
     const cb = this.onShotDone;
     this.onShotDone = null;
     if (cb) cb();
   };
 
-  /* Raundu kazananın zafer dansı; sunucudan roundEnd gelince tetiklenir. */
-  GameView.prototype.startDance = function (winner) {
-    if (!this.state) return;
-    this.dance = { who: winner, t: 0 };
+  /* Raundu kazanan takımın yaşayan gorilleri zafer dansı yapar. */
+  GameView.prototype.startDance = function (team) {
+    if (!this.state || !team) return;
+    this.dance = { team: team, t: 0 };
     this.sound.fanfare();
   };
 
   GameView.prototype.stepDance = function (dtFrames) {
     const d = this.dance;
     d.t += dtFrames;
-    this.arms[d.who] = (Math.floor(d.t / 8) % 2) ? 1 : 2;
-    if (d.t > 150) { this.dance = null; this.arms = [0, 0]; }
+    const up = (Math.floor(d.t / 8) % 2) ? 1 : 2;
+    for (let i = 0; i < this.state.gorillas.length; i++) {
+      const g = this.state.gorillas[i];
+      if (g && !g.dead && g.team === d.team) this.arms[i] = up;
+    }
+    if (d.t > 150) { this.dance = null; this.arms = this.arms.map(() => 0); }
   };
 
   GameView.prototype.loop = function (ts) {

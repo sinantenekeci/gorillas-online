@@ -123,6 +123,9 @@ test("iki oyuncu odada buluşur, yazışır ve maçı oynar", async () => {
   ayse.send({ t: "join", roomId: roomId });
   await ayse.wait("joined");
 
+  // Haxball duzeni: maci oda sahibi baslatir
+  ali.send({ t: "start" });
+
   // sohbet iki yönlü çalışıyor
   ayse.clear();
   ali.send({ t: "chat", text: "muz hazır mı" });
@@ -140,13 +143,19 @@ test("iki oyuncu odada buluşur, yazışır ve maçı oynar", async () => {
   // maç başlar
   const round = await ali.wait("round", 5000);
   assert.strictEqual(round.round, 1);
-  assert.deepStrictEqual(round.names, ["Ali", "Ayşe"]);
+  assert.strictEqual(round.red, 1);
+  assert.strictEqual(round.blue, 1);
+  assert.deepStrictEqual(round.players.map((p) => p.name), ["Ali", "Ayşe"]);
+  assert.deepStrictEqual(round.players.map((p) => p.team), ["red", "blue"]);
   assert.ok(Math.abs(round.wind) <= 4);
 
   // rastgele harita testi kırılgan yapmasın: sahneyi bilinen boş bir düzene sabitliyoruz
   hub.rooms.get(roomId).match.state = {
-    buildings: [], craters: [], gravity: 9.8, wind: 0, sunHit: true,
-    gorillas: [{ x: 60, y: 300, dead: false }, { x: 600, y: 380, dead: false }]
+    buildings: [], craters: [], gravity: 9.8, wind: 0, sunHit: true, clouds: [],
+    gorillas: [
+      { x: 60, y: 300, dead: false, team: "red", facing: 1 },
+      { x: 900, y: 380, dead: false, team: "blue", facing: -1 }
+    ]
   };
 
   // sırası olmayan atış yapamaz
@@ -160,7 +169,7 @@ test("iki oyuncu odada buluşur, yazışır ve maçı oynar", async () => {
   const s1 = await ali.wait("shot");
   const s2 = await ayse.wait("shot");
   assert.deepStrictEqual(s1.frames, s2.frames, "iki istemci aynı yörüngeyi görmeli");
-  assert.strictEqual(s1.seat, 0);
+  assert.strictEqual(s1.shooter, 0);
   assert.ok(s1.frames.length > 2, "yörünge birden fazla kare sürmeli");
   assert.strictEqual(s1.impact.type, "out", "boş sahnede muz ekrandan çıkmalı");
 

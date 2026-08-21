@@ -1,7 +1,7 @@
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert");
-const { Hub, normalizeSettings, clean } = require("../server/rooms.js");
+const { Hub, normalizeSettings, clean, TEAM_MAX } = require("../server/rooms.js");
 const core = require("../shared/game-core.js");
 
 let seq = 0;
@@ -45,6 +45,40 @@ async function until(pred, ms) {
   return false;
 }
 
+/* İki takımlı, tek kişilik, uzun turlu bir maç kurup başlatır. */
+async function kurVeBaslat(hub, ayar) {
+  const a = mkClient(hub, "Ali");
+  hub.handle(a.id, { t: "create", name: "Oda", settings: Object.assign({ turnSeconds: 120 }, ayar) });
+  const id = a.last("joined").roomId;
+  const b = mkClient(hub, "Ayşe");
+  hub.handle(b.id, { t: "join", roomId: id });
+  hub.handle(a.id, { t: "start" });
+  const basladi = await until(() => a.last("round"), 3000);
+  return { a, b, id, basladi };
+}
+
+/* Belirli bir gorili kesin vurmak için sahneyi bilinen bir düzene sabitler.
+   Rastgele şehirde atışın nereye gideceği garanti değil. */
+function sahneyiSabitle(hub, id, gorilSayisi) {
+  const room = hub.rooms.get(id);
+  const gorillas = [];
+  for (let i = 0; i < gorilSayisi; i++) {
+    const kirmizi = room.match.state.gorillas[i].team === "red";
+    gorillas.push({
+      x: kirmizi ? 100 + i * 30 : 400 + i * 30,
+      y: kirmizi ? 300 : 285,
+      dead: room.match.state.gorillas[i].dead,
+      team: room.match.state.gorillas[i].team,
+      facing: room.match.state.gorillas[i].facing
+    });
+  }
+  room.match.state = {
+    buildings: [], craters: [], gravity: 0, wind: 0, sunHit: true,
+    clouds: [], gorillas: gorillas
+  };
+  return room;
+}
+
 /* ---------------- ayar doğrulama ---------------- */
 test("ayarlar sınırların dışına taşmaz", () => {
   const s = normalizeSettings({ rounds: 999, gravity: 42, maxPlayers: 0, turnSeconds: 3 });
@@ -55,22 +89,30 @@ test("ayarlar sınırların dışına taşmaz", () => {
 });
 
 test("isimlerden kontrol karakterleri temizlenir ve boy sınırlanır", () => {
-  assert.strictEqual(clean("  AliVeli  ", 14), "AliVeli");
+  assert.strictEqual(clean("  AliVeli  ", 14), "AliVeli");
   assert.strictEqual(clean("çokçokçokuzunbirisim", 14).length, 14);
   assert.strictEqual(clean(null, 14), "");
 });
 
+test("tema ayarı doğrulanır, tanınmayan değer gündüze düşer", () => {
+  assert.strictEqual(normalizeSettings({}).theme, "day");
+  assert.strictEqual(normalizeSettings({ theme: "night" }).theme, "night");
+  assert.strictEqual(normalizeSettings({ theme: "kozmik" }).theme, "day");
+  assert.strictEqual(normalizeSettings({ theme: 42 }).theme, "day");
+});
+
 /* ---------------- oda kurma / katılma ---------------- */
-test("oda kurulur ve kuran ilk koltuğa oturur", () => {
+test("oda kurulur ve kuran kırmızı takıma yerleşir", () => {
   const hub = mkHub();
   const a = mkClient(hub, "Ali");
   hub.handle(a.id, { t: "create", name: "Muz Ligi" });
   const st = a.last("roomState");
   assert.ok(st, "roomState gelmeli");
   assert.strictEqual(st.name, "Muz Ligi");
-  assert.strictEqual(st.seats[0], a.id);
   assert.strictEqual(st.hostId, a.id);
   assert.strictEqual(st.hasPassword, false);
+  assert.strictEqual(st.members[0].team, "red");
+  assert.strictEqual(st.teamMax, TEAM_MAX);
 });
 
 test("oda özetleri ve durum mesajı şifreyi asla taşımaz", () => {
@@ -115,19 +157,51 @@ test("var olmayan oda ve dolu oda ayrı hata kodu döner", () => {
   assert.strictEqual(c.last("err").code, "full");
 });
 
-test("üçüncü kişi izleyici sırasına girer", () => {
+test("gelenler takımlara dönüşümlü dağıtılır, dolunca izleyici kalır", () => {
+  const hub = mkHub();
+  const a = mkClient(hub, "P1");
+  hub.handle(a.id, { t: "create", name: "Oda" });
+  const id = a.last("joined").roomId;
+
+  const hepsi = [a];
+  for (let i = 2; i <= 2 * TEAM_MAX + 1; i++) {
+    const c = mkClient(hub, "P" + i);
+    hub.handle(c.id, { t: "join", roomId: id });
+    hepsi.push(c);
+  }
+  const st = hepsi[hepsi.length - 1].last("roomState");
+  const kirmizi = st.members.filter((m) => m.team === "red");
+  const mavi = st.members.filter((m) => m.team === "blue");
+  const izleyici = st.members.filter((m) => m.team === null);
+  assert.strictEqual(kirmizi.length, TEAM_MAX);
+  assert.strictEqual(mavi.length, TEAM_MAX);
+  assert.strictEqual(izleyici.length, 1, "takımlar dolunca fazlası izleyici olmalı");
+});
+
+test("takım değiştirilebilir, dolu takıma geçilemez", () => {
   const hub = mkHub();
   const a = mkClient(hub, "Ali");
   hub.handle(a.id, { t: "create", name: "Oda" });
   const id = a.last("joined").roomId;
-  const b = mkClient(hub, "Ayşe");
-  const c = mkClient(hub, "Can");
-  hub.handle(b.id, { t: "join", roomId: id });
-  hub.handle(c.id, { t: "join", roomId: id });
 
-  const st = c.last("roomState");
-  assert.deepStrictEqual(st.seats, [a.id, b.id]);
-  assert.deepStrictEqual(st.queue, [c.id]);
+  hub.handle(a.id, { t: "team", team: "blue" });
+  assert.strictEqual(a.last("roomState").members[0].team, "blue");
+
+  hub.handle(a.id, { t: "team", team: "spec" });
+  assert.strictEqual(a.last("roomState").members[0].team, null);
+
+  // maviyi doldur, sonra bir kişi daha geçmeye çalışsın
+  const digerleri = [];
+  for (let i = 0; i < TEAM_MAX; i++) {
+    const c = mkClient(hub, "M" + i);
+    hub.handle(c.id, { t: "join", roomId: id });
+    hub.handle(c.id, { t: "team", team: "blue" });
+    digerleri.push(c);
+  }
+  a.clear();
+  hub.handle(a.id, { t: "team", team: "blue" });
+  assert.ok(a.last("err"), "dolu takıma geçiş reddedilmeli");
+  assert.strictEqual(hub.clients.get(a.id).team, null);
 });
 
 test("aynı isimle girenlerin adı odada ayrıştırılır", () => {
@@ -137,7 +211,6 @@ test("aynı isimle girenlerin adı odada ayrıştırılır", () => {
   const id = a.last("joined").roomId;
   const b = mkClient(hub, "Goril");
   hub.handle(b.id, { t: "join", roomId: id });
-  assert.notStrictEqual(b.last("joined").name, a.name);
   assert.strictEqual(b.last("joined").name, "Goril(2)");
 });
 
@@ -178,6 +251,7 @@ test("sohbet odadaki herkese gider, boş mesaj gitmez", () => {
   assert.strictEqual(msgs.length, 1);
   assert.strictEqual(msgs[0].text, "selam");
   assert.strictEqual(msgs[0].name, "Ali");
+  assert.strictEqual(msgs[0].team, "red", "mesaj gönderenin takımını taşımalı");
 });
 
 test("sohbet hız sınırı devreye girer", () => {
@@ -200,7 +274,7 @@ test("odada olmayan sohbet edemez", () => {
 });
 
 /* ---------------- yetki ---------------- */
-test("ayarları ve atmayı yalnızca oda sahibi yapabilir", () => {
+test("ayar, atma ve maç başlatma yalnızca oda sahibinin", () => {
   const hub = mkHub();
   const a = mkClient(hub, "Ali");
   hub.handle(a.id, { t: "create", name: "Oda" });
@@ -213,6 +287,11 @@ test("ayarları ve atmayı yalnızca oda sahibi yapabilir", () => {
   assert.ok(b.last("err"));
   assert.strictEqual(hub.rooms.get(id).settings.rounds, 3);
 
+  b.clear();
+  hub.handle(b.id, { t: "start" });
+  assert.ok(b.last("err"), "maçı sahibi olmayan başlatamaz");
+  assert.strictEqual(hub.rooms.get(id).starting, false);
+
   hub.handle(b.id, { t: "kick", id: a.id });
   assert.strictEqual(hub.rooms.get(id).members.length, 2);
 
@@ -224,146 +303,186 @@ test("ayarları ve atmayı yalnızca oda sahibi yapabilir", () => {
   assert.strictEqual(b.last("err").code, "kicked");
 });
 
-/* ---------------- maç akışı ---------------- */
-test("iki koltuk dolunca maç başlar ve sıra dönüşümlü ilerler", async () => {
-  const hub = mkHub(100);
+test("tek takımla maç başlamaz", () => {
+  const hub = mkHub();
   const a = mkClient(hub, "Ali");
-  hub.handle(a.id, { t: "create", name: "Oda", settings: { turnSeconds: 120 } });
-  const id = a.last("joined").roomId;
-  const b = mkClient(hub, "Ayşe");
-  hub.handle(b.id, { t: "join", roomId: id });
+  hub.handle(a.id, { t: "create", name: "Oda" });
+  a.clear();
+  hub.handle(a.id, { t: "start" });
+  assert.ok(a.last("err"), "karşı takım boşken uyarı gelmeli");
+  assert.strictEqual(a.last("countdown"), null);
+});
 
-  assert.ok(a.last("countdown"), "geri sayım yayınlanmalı");
-  assert.ok(await until(() => a.last("round"), 3000), "raunt başlamalı");
+/* ---------------- maç akışı ---------------- */
+test("maç başlar, goriller takımlara göre yerleşir ve sıra dönüşümlü ilerler", async () => {
+  const hub = mkHub(100);
+  const { a, b, id, basladi } = await kurVeBaslat(hub);
+  assert.ok(basladi, "raunt başlamalı");
 
   const round = a.last("round");
   assert.strictEqual(round.round, 1);
-  assert.strictEqual(round.turn, 0);
-  assert.deepStrictEqual(round.names, ["Ali", "Ayşe"]);
+  assert.strictEqual(round.red, 1);
+  assert.strictEqual(round.blue, 1);
+  assert.strictEqual(round.players.length, 2);
+  assert.strictEqual(round.players[0].team, "red");
+  assert.strictEqual(round.players[1].team, "blue");
 
-  // Rastgele şehirde bitişik yüksek bir bina atışı ilk karelerde durdurabiliyor;
-  // ıskayı sınamak için sahneyi bilinen boş bir düzene sabitliyoruz.
-  hub.rooms.get(id).match.state = {
-    buildings: [], craters: [], gravity: 9.8, wind: 0, sunHit: true,
-    gorillas: [{ x: 60, y: 300, dead: false }, { x: 600, y: 380, dead: false }]
-  };
+  const st = hub.rooms.get(id).match.state;
+  assert.strictEqual(st.gorillas[0].team, "red");
+  assert.strictEqual(st.gorillas[0].facing, 1);
+  assert.strictEqual(st.gorillas[1].team, "blue");
+  assert.strictEqual(st.gorillas[1].facing, -1);
+  assert.ok(st.gorillas[0].x < st.gorillas[1].x, "kırmızı solda, mavi sağda");
+
+  // ilk sıra kırmızıda
+  assert.strictEqual(a.last("turn").turn, 0);
 
   // sırası olmayan ateş edemez
   const before = a.all("shot").length;
   hub.handle(b.id, { t: "fire", angle: 45, velocity: 100 });
   assert.strictEqual(a.all("shot").length, before);
 
-  // ıskalayan atış sırayı devreder
+  // ıskalayan atış sırayı rakip takıma devreder
+  sahneyiSabitle(hub, id, 2);
   hub.handle(a.id, { t: "fire", angle: 45, velocity: 200 });
   const shot = a.last("shot");
   assert.ok(shot, "atış yayınlanmalı");
-  assert.strictEqual(shot.seat, 0);
+  assert.strictEqual(shot.shooter, 0);
   assert.strictEqual(shot.impact.type, "out");
-  assert.ok(shot.frames.length > 2);
 
   assert.ok(await until(() => { const t = a.last("turn"); return t && t.turn === 1; }, 4000),
-    "ıskadan sonra sıra rakibe geçmeli");
+    "ıskadan sonra sıra maviye geçmeli");
 });
 
-test("isabet raundu bitirir, skor işlenir ve maç sonunda koltuk devri olur", async () => {
-  const hub = mkHub(300);
-  const a = mkClient(hub, "Ali");
-  hub.handle(a.id, { t: "create", name: "Oda", settings: { rounds: 1 } });
-  const id = a.last("joined").roomId;
-  const b = mkClient(hub, "Ayşe");
-  const c = mkClient(hub, "Can");
-  hub.handle(b.id, { t: "join", roomId: id });
-  hub.handle(c.id, { t: "join", roomId: id });
+test("takımın tüm gorilleri ölünce raunt biter ve skor işlenir", async () => {
+  const hub = mkHub(100);
+  const { a, b, id, basladi } = await kurVeBaslat(hub, { rounds: 1 });
+  assert.ok(basladi);
 
-  assert.ok(await until(() => a.last("round"), 3000));
-  const room = hub.rooms.get(id);
-
-  // isabeti garantilemek için sahneyi bilinen bir düzene çeviriyoruz
-  room.match.state = {
-    buildings: [], craters: [], gravity: 0, wind: 0, sunHit: true,
-    gorillas: [{ x: 100, y: 300, dead: false }, { x: 400, y: 285, dead: false }]
-  };
+  sahneyiSabitle(hub, id, 2);
   hub.handle(a.id, { t: "fire", angle: 0, velocity: 100 });
-  assert.strictEqual(a.last("shot").impact.victim, 1);
+  assert.strictEqual(a.last("shot").impact.victim, 1, "mavi goril vurulmalı");
 
   assert.ok(await until(() => a.last("roundEnd"), 4000), "raunt bitmeli");
-  assert.deepStrictEqual(a.last("roundEnd").scores, [1, 0]);
+  assert.strictEqual(a.last("roundEnd").winner, "red");
+  assert.deepStrictEqual(a.last("roundEnd").scores, { red: 1, blue: 0 });
 
   assert.ok(await until(() => a.last("matchEnd"), 6000), "maç bitmeli");
-  const end = a.last("matchEnd");
-  assert.strictEqual(end.winner, 0);
-  assert.deepStrictEqual(end.names, ["Ali", "Ayşe"]);
-
-  // kazanan kalır, kaybeden sıranın sonuna gider, izleyici sahaya çıkar
-  assert.strictEqual(room.seats[0], a.id);
-  assert.strictEqual(room.seats[1], c.id);
-  assert.deepStrictEqual(room.queue, [b.id]);
+  assert.strictEqual(a.last("matchEnd").winner, "red");
+  assert.strictEqual(hub.rooms.get(id).match, null);
 });
 
-test("sahadaki oyuncu kopunca rakip maçı kazanır", async () => {
-  const hub = mkHub(300);
-  const a = mkClient(hub, "Ali");
-  hub.handle(a.id, { t: "create", name: "Oda" });
+test("takımda yaşayan varken raunt bitmez, sıra takım arkadaşına geçer", async () => {
+  const hub = mkHub(100);
+  const a = mkClient(hub, "K1");
+  hub.handle(a.id, { t: "create", name: "Oda", settings: { turnSeconds: 120 } });
   const id = a.last("joined").roomId;
-  const b = mkClient(hub, "Ayşe");
+  const b = mkClient(hub, "M1");
+  const c = mkClient(hub, "K2");
+  const d = mkClient(hub, "M2");
   hub.handle(b.id, { t: "join", roomId: id });
+  hub.handle(c.id, { t: "join", roomId: id });
+  hub.handle(d.id, { t: "join", roomId: id });
+  hub.handle(a.id, { t: "start" });
   assert.ok(await until(() => a.last("round"), 3000));
 
+  const round = a.last("round");
+  assert.strictEqual(round.red, 2);
+  assert.strictEqual(round.blue, 2);
+  // sira: kirmizi0, mavi0, kirmizi1, mavi1
+  assert.deepStrictEqual(hub.rooms.get(id).match.order, [0, 2, 1, 3]);
+
+  sahneyiSabitle(hub, id, 4);
+  hub.handle(a.id, { t: "fire", angle: 0, velocity: 100 });
+  const shot = a.last("shot");
+  assert.ok(shot.impact.victim >= 2, "mavi takımdan biri vurulmalı");
+
+  assert.ok(await until(() => { const t = a.last("turn"); return t && t.turn !== 0; }, 4000));
+  assert.strictEqual(a.last("roundEnd"), null, "mavi takımda hâlâ yaşayan var, raunt bitmemeli");
+});
+
+test("maç ortasında kopan oyuncunun gorili ölür", async () => {
+  const hub = mkHub(100);
+  const { a, b, id, basladi } = await kurVeBaslat(hub, { rounds: 1 });
+  assert.ok(basladi);
+
   hub.removeClient(b.id);
-  const end = a.last("matchEnd");
-  assert.ok(end, "maç sonu yayınlanmalı");
-  assert.strictEqual(end.winner, 0);
-  assert.strictEqual(hub.rooms.get(id).match, null);
+  assert.ok(a.last("roundEnd"), "mavi takım tükendiği için raunt bitmeli");
+  assert.strictEqual(a.last("roundEnd").winner, "red");
 });
 
 test("süre dolunca sıra otomatik geçer", async () => {
   const hub = mkHub(300);
-  const a = mkClient(hub, "Ali");
-  hub.handle(a.id, { t: "create", name: "Oda", settings: { turnSeconds: 10 } });
-  const id = a.last("joined").roomId;
-  const b = mkClient(hub, "Ayşe");
-  hub.handle(b.id, { t: "join", roomId: id });
-  assert.ok(await until(() => a.last("round"), 3000));
-
-  // 10 sn / 300 hız = ~33 ms
+  const { a, basladi } = await kurVeBaslat(hub, { turnSeconds: 10 });
+  assert.ok(basladi);
   assert.ok(await until(() => { const t = a.last("turn"); return t && t.turn === 1; }, 3000),
     "süre dolunca sıra geçmeli");
 });
 
-test("maç sürerken koltuğa oturulamaz", async () => {
-  const hub = mkHub(300);
+test("maç sürerken takım değiştirilemez", async () => {
+  const hub = mkHub(100);
   const a = mkClient(hub, "Ali");
-  hub.handle(a.id, { t: "create", name: "Oda" });
+  hub.handle(a.id, { t: "create", name: "Oda", settings: { turnSeconds: 120 } });
   const id = a.last("joined").roomId;
   const b = mkClient(hub, "Ayşe");
-  const c = mkClient(hub, "Can");
   hub.handle(b.id, { t: "join", roomId: id });
+  const c = mkClient(hub, "Can");
   hub.handle(c.id, { t: "join", roomId: id });
+  hub.handle(c.id, { t: "team", team: "spec" });
+  hub.handle(a.id, { t: "start" });
   assert.ok(await until(() => a.last("round"), 3000));
 
   c.clear();
-  hub.handle(c.id, { t: "sit" });
-  assert.ok(c.last("err"), "maç sırasında oturma reddedilmeli");
-  assert.strictEqual(hub.rooms.get(id).seats.indexOf(c.id), -1);
+  hub.handle(c.id, { t: "team", team: "red" });
+  assert.ok(c.last("err"), "maç sırasında takım değişimi reddedilmeli");
+  assert.strictEqual(hub.clients.get(c.id).team, null);
 });
 
 test("nişan bilgisi yalnızca sırası gelen oyuncudan yayılır", async () => {
-  const hub = mkHub(300);
-  const a = mkClient(hub, "Ali");
-  hub.handle(a.id, { t: "create", name: "Oda" });
-  const id = a.last("joined").roomId;
-  const b = mkClient(hub, "Ayşe");
-  hub.handle(b.id, { t: "join", roomId: id });
-  assert.ok(await until(() => a.last("round"), 3000));
+  const hub = mkHub(100);
+  const { a, b, basladi } = await kurVeBaslat(hub);
+  assert.ok(basladi);
 
   b.clear(); a.clear();
   hub.handle(a.id, { t: "aim", angle: 30, velocity: 77 });
   assert.strictEqual(b.last("aim").velocity, 77);
+  assert.strictEqual(b.last("aim").shooter, 0);
   assert.strictEqual(a.last("aim"), null, "kendi nişanı geri gönderilmez");
 
   a.clear();
   hub.handle(b.id, { t: "aim", angle: 10, velocity: 20 });
   assert.strictEqual(a.last("aim"), null, "sırası olmayanın nişanı yayılmaz");
+});
+
+test("atış parametreleri sunucuda sınırlanır", async () => {
+  const hub = mkHub(100);
+  const { a, basladi } = await kurVeBaslat(hub);
+  assert.ok(basladi);
+  hub.handle(a.id, { t: "fire", angle: 5000, velocity: 99999 });
+  const shot = a.last("shot");
+  assert.strictEqual(shot.angle, 90);
+  assert.strictEqual(shot.velocity, 200);
+});
+
+test("raunt mesajı temayı taşır, herkes aynı gökyüzünü çizer", async () => {
+  const hub = mkHub(100);
+  const { a, b, basladi } = await kurVeBaslat(hub, { theme: "night" });
+  assert.ok(basladi);
+  assert.strictEqual(a.last("round").theme, "night");
+  assert.strictEqual(b.last("round").theme, "night");
+  assert.strictEqual(b.last("roomState").settings.theme, "night");
+});
+
+test("maç başlarken oda durumu dolu match ile yayınlanır", async () => {
+  // istemci sırayı yalnızca match bilgisiyle açıyor; boş gelirse ateş düğmesi kilitli kalır
+  const hub = mkHub(100);
+  const { b, basladi } = await kurVeBaslat(hub);
+  assert.ok(basladi);
+  assert.ok(await until(() => { const s = b.last("roomState"); return s && s.match; }, 3000));
+  const st = b.last("roomState");
+  assert.strictEqual(st.match.round, 1);
+  assert.ok(typeof st.match.seed === "number");
+  assert.strictEqual(st.match.players.length, 2);
 });
 
 test("bilinmeyen mesaj türü ve bozuk veri sunucuyu düşürmez", () => {
@@ -376,29 +495,17 @@ test("bilinmeyen mesaj türü ve bozuk veri sunucuyu düşürmez", () => {
     hub.handle("olmayan-id", { t: "chat", text: "x" });
     hub.handle(a.id, { t: "create", name: { garip: true }, settings: "cop" });
     hub.handle(a.id, { t: "fire", angle: "abc", velocity: NaN });
+    hub.handle(a.id, { t: "team", team: 12345 });
+    hub.handle(a.id, { t: "start" });
   });
-});
-
-test("atış parametreleri sunucuda sınırlanır", async () => {
-  const hub = mkHub(300);
-  const a = mkClient(hub, "Ali");
-  hub.handle(a.id, { t: "create", name: "Oda" });
-  const id = a.last("joined").roomId;
-  const b = mkClient(hub, "Ayşe");
-  hub.handle(b.id, { t: "join", roomId: id });
-  assert.ok(await until(() => a.last("round"), 3000));
-
-  hub.handle(a.id, { t: "fire", angle: 5000, velocity: 99999 });
-  const shot = a.last("shot");
-  assert.strictEqual(shot.angle, 90);
-  assert.strictEqual(shot.velocity, 200);
 });
 
 test("simülasyon sunucu durumuyla istemci durumunu aynı tutar", () => {
   // sunucunun uyguladığı krater, istemcinin aynı tohumdan kurduğu sahnede de aynı yeri açar
   const seed = 4242;
-  const server = core.createRound(seed, { gravity: 9.8, windOn: true });
-  const client = core.createRound(seed, { gravity: 9.8, windOn: true });
+  const opts = { gravity: 9.8, windOn: true, red: 2, blue: 2 };
+  const server = core.createRound(seed, opts);
+  const client = core.createRound(seed, opts);
   client.wind = server.wind;
 
   const shot = core.simulateShot(server, 0, 60, 80);
@@ -410,45 +517,4 @@ test("simülasyon sunucu durumuyla istemci durumunu aynı tutar", () => {
     core.solid(client, shot.impact.x, shot.impact.y),
     core.solid(server, shot.impact.x, shot.impact.y)
   );
-});
-
-
-test("maç başlarken oda durumu dolu match ile yayınlanır", async () => {
-  // istemci sırayı yalnızca match bilgisiyle açıyor; boş gelirse ateş düğmesi kilitli kalır
-  const hub = mkHub(100);
-  const a = mkClient(hub, "Ali");
-  hub.handle(a.id, { t: "create", name: "Oda", settings: { turnSeconds: 120 } });
-  const id = a.last("joined").roomId;
-  const b = mkClient(hub, "Ayşe");
-  hub.handle(b.id, { t: "join", roomId: id });
-
-  assert.ok(await until(() => { const s = b.last("roomState"); return s && s.match; }, 3000),
-    "maç başlayınca dolu roomState gelmeli");
-  const st = b.last("roomState");
-  assert.strictEqual(st.match.round, 1);
-  assert.strictEqual(st.match.phase, "aim");
-  assert.ok(typeof st.match.seed === "number");
-  assert.strictEqual(st.seats[1], b.id);
-});
-
-/* ---------------- tema ---------------- */
-test("tema ayarı doğrulanır, tanınmayan değer gündüze düşer", () => {
-  assert.strictEqual(normalizeSettings({}).theme, "day");
-  assert.strictEqual(normalizeSettings({ theme: "night" }).theme, "night");
-  assert.strictEqual(normalizeSettings({ theme: "kozmik" }).theme, "day");
-  assert.strictEqual(normalizeSettings({ theme: 42 }).theme, "day");
-});
-
-test("raunt mesajı temayı taşır, herkes aynı gökyüzünü çizer", async () => {
-  const hub = mkHub(100);
-  const a = mkClient(hub, "Ali");
-  hub.handle(a.id, { t: "create", name: "Gece Odası", settings: { theme: "night", turnSeconds: 120 } });
-  const id = a.last("joined").roomId;
-  const b = mkClient(hub, "Ayşe");
-  hub.handle(b.id, { t: "join", roomId: id });
-
-  assert.ok(await until(() => a.last("round"), 3000), "raunt başlamalı");
-  assert.strictEqual(a.last("round").theme, "night");
-  assert.strictEqual(b.last("round").theme, "night");
-  assert.strictEqual(b.last("roomState").settings.theme, "night");
 });

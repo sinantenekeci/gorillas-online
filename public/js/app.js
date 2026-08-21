@@ -1,4 +1,4 @@
-/* Arayüz bağlantıları: lobi, oda, sohbet, kontroller.
+/* Arayüz bağlantıları: lobi, oda, takımlar, sohbet, kontroller.
    Tek yönlü akış: sunucu mesajı gelir -> yerel durum güncellenir -> render. */
 (function () {
   "use strict";
@@ -12,13 +12,15 @@
     roomSearch: $("roomSearch"), refreshBtn: $("refreshBtn"), createBtn: $("createBtn"),
     roomName: $("roomName"), roomCode: $("roomCode"), copyLinkBtn: $("copyLinkBtn"),
     leaveBtn: $("leaveBtn"), settingsBtn: $("settingsBtn"),
-    s1name: $("s1name"), s2name: $("s2name"), s1val: $("s1val"), s2val: $("s2val"),
+    redVal: $("redVal"), blueVal: $("blueVal"),
     roundLabel: $("roundLabel"), windLabel: $("windLabel"),
     overlay: $("overlay"), overlayTitle: $("overlayTitle"), overlayText: $("overlayText"),
     turnText: $("turnText"), timerWrap: $("timerWrap"), timerFill: $("timerFill"), timerNum: $("timerNum"),
     ang: $("ang"), vel: $("vel"), angV: $("angV"), velV: $("velV"), fireBtn: $("fireBtn"),
     seatHint: $("seatHint"),
-    seatList: $("seatList"), seatBtn: $("seatBtn"), queueList: $("queueList"), queueCount: $("queueCount"),
+    redList: $("redList"), blueList: $("blueList"), specList: $("specList"),
+    redCount: $("redCount"), blueCount: $("blueCount"), specCount: $("specCount"),
+    joinRed: $("joinRed"), joinBlue: $("joinBlue"), joinSpec: $("joinSpec"), startBtn: $("startBtn"),
     chatLog: $("chatLog"), chatForm: $("chatForm"), chatInput: $("chatInput"),
     modal: $("modalRoot"), modalTitle: $("modalTitle"),
     formCreate: $("formCreate"), formJoin: $("formJoin"), formNick: $("formNick"), formSettings: $("formSettings"),
@@ -35,13 +37,16 @@
 
   let me = { id: null, name: store.get("gor.nick", "") };
   let room = null;            // son roomState
-  let mySeat = -1;
+  let myTeam = null;          // "red" | "blue" | null
+  let myGorilla = -1;         // maçtaki goril indeksim
   let phase = "idle";         // idle | aim | resolving | roundover | matchover
-  let pendingJoin = null;     // {roomId}
-  let lastJoin = null;        // {roomId, password} — yalnızca bellekte, yeniden bağlanınca odaya dönmek için
-  let lastPassword = "";      // son denenen oda şifresi; diske yazılmaz
+  let pendingJoin = null;
+  let lastJoin = null;        // {roomId, password} — yalnızca bellekte
+  let lastPassword = "";
   let timer = { end: 0, total: 30, raf: 0 };
   let soundOn = store.get("gor.sound", "1") === "1";
+
+  const TEAM_TR = { red: "Kırmızı", blue: "Mavi" };
 
   /* ---------- yardımcılar ---------- */
   function esc(s) {
@@ -107,7 +112,8 @@
      odaya yeniden giriyoruz. */
   net.on("close", () => {
     room = null;
-    mySeat = -1;
+    myTeam = null;
+    myGorilla = -1;
     phase = "idle";
     stopTimer();
     setControls(false);
@@ -154,8 +160,6 @@
       lastPassword = "";
       setHash("");
       closeModal();
-      // Sunucu yeniden başladıysa oda artık yok; odada gibi görünen ekranda
-      // bırakmak yerine lobiye dönüyoruz.
       if (!room) {
         view.clear();
         switchView(false);
@@ -205,9 +209,10 @@
       "</div>" +
       '<div class="room-card__meta">' +
         '<span><svg class="ic" aria-hidden="true"><use href="#i-users"/></svg>' + r.count + "/" + r.max + "</span>" +
+        "<span>" + r.red + "v" + r.blue + "</span>" +
         "<span>" + r.rounds + " raunt</span>" +
         "<span>" + gravName + "</span>" +
-        "<span>" + (r.windOn ? "rüzgârlı" : "rüzgârsız") + "</span>" +
+        "<span>" + (r.theme === "night" ? "gece" : "gündüz") + "</span>" +
       "</div>" +
       '<div class="room-card__foot">' +
         (r.playing ? '<span class="tag tag--live">MAÇ SÜRÜYOR</span>'
@@ -316,9 +321,9 @@
     $("stGrav").value = String(room.settings.gravity);
     $("stWind").value = room.settings.windOn ? "1" : "0";
     $("stMax").value = room.settings.maxPlayers;
-    $("stTheme").value = room.settings.theme || "day";
     $("stTurn").value = room.settings.turnSeconds;
     $("stTurnV").textContent = room.settings.turnSeconds;
+    $("stTheme").value = room.settings.theme || "day";
     openModal(el.formSettings, "ODA AYARLARI");
   });
 
@@ -329,12 +334,12 @@
     lastJoin = { roomId: m.roomId, password: lastPassword };
     setHash(m.roomId);
     el.chatLog.innerHTML = "";
-    view.clear("OYUNCULAR BEKLENİYOR");
+    view.clear("MAÇ BEKLENİYOR");
     switchView(true);
   });
 
   net.on("left", () => {
-    room = null; mySeat = -1; phase = "idle";
+    room = null; myTeam = null; myGorilla = -1; phase = "idle";
     lastJoin = null; lastPassword = "";
     setHash("");
     view.clear();
@@ -345,35 +350,34 @@
   net.on("roomState", (m) => {
     room = m;
     view.setTheme(m.settings.theme);
-    mySeat = m.seats.indexOf(me.id);
-    renderRoom();
+    const mine = m.members.find((x) => x.id === me.id);
+    myTeam = mine ? mine.team : null;
+    myGorilla = m.match ? gorillaOf(m.match.players, me.id) : -1;
+
     if (m.match && !view.state) {
       view.setRound({
         seed: m.match.seed, wind: m.match.wind, gravity: m.match.gravity,
+        theme: m.settings.theme, red: m.match.red, blue: m.match.blue,
         round: m.match.round, totalRounds: m.match.totalRounds,
-        scores: m.match.scores, turn: m.match.turn,
-        names: [seatName(0), seatName(1)]
+        scores: m.match.scores, turn: m.match.turn, players: m.match.players
       });
       view.applySnapshot(m.match);
       phase = m.match.phase;
-      updateTurnUI();
-    } else if (!m.match && view.state && phase === "idle") {
-      view.clear("OYUNCULAR BEKLENİYOR");
+    } else if (!m.match && view.state && phase !== "matchover") {
+      view.clear("MAÇ BEKLENİYOR");
     }
+    renderRoom();
   });
+
+  function gorillaOf(players, id) {
+    const p = (players || []).find((x) => x.id === id);
+    return p ? p.gorilla : -1;
+  }
 
   function switchView(inRoom) {
     show(el.viewRoom, inRoom);
     show(el.viewLobby, !inRoom);
     if (inRoom) el.chatInput.focus();
-  }
-
-  function seatName(i) {
-    if (!room) return "—";
-    const id = room.seats[i];
-    if (!id) return "—";
-    const m = room.members.find((x) => x.id === id);
-    return m ? m.name : "—";
   }
 
   function renderRoom() {
@@ -382,68 +386,84 @@
     el.roomCode.textContent = room.id;
     show(el.settingsBtn, room.hostId === me.id);
 
-    el.s1name.textContent = seatName(0);
-    el.s2name.textContent = seatName(1);
-    const sc = room.match ? room.match.scores : [0, 0];
-    el.s1val.textContent = sc[0];
-    el.s2val.textContent = sc[1];
+    const sc = room.match ? room.match.scores : { red: 0, blue: 0 };
+    el.redVal.textContent = sc.red;
+    el.blueVal.textContent = sc.blue;
     el.roundLabel.textContent = room.match
       ? "RAUNT " + room.match.round + "/" + room.match.totalRounds
       : room.settings.rounds + " RAUNTLUK MAÇ";
-    el.windLabel.textContent = room.match ? windText(room.match.wind) : (room.settings.windOn ? "rüzgâr açık" : "rüzgâr kapalı");
+    el.windLabel.textContent = room.match
+      ? windText(room.match.wind)
+      : (room.settings.windOn ? "rüzgâr açık" : "rüzgâr kapalı");
 
-    const turn = room.match ? room.match.turn : -1;
-    document.querySelector(".score--p1").classList.toggle("is-turn", turn === 0);
-    document.querySelector(".score--p2").classList.toggle("is-turn", turn === 1);
+    const turnTeam = turnTeamOf();
+    document.querySelector(".score--red").classList.toggle("is-turn", turnTeam === "red");
+    document.querySelector(".score--blue").classList.toggle("is-turn", turnTeam === "blue");
 
-    // koltuklar
-    el.seatList.innerHTML = [0, 1].map((i) => {
-      const id = room.seats[i];
-      const m = id ? room.members.find((x) => x.id === id) : null;
-      const cls = "seat seat--p" + (i + 1) + (m ? "" : " seat--empty") + (turn === i ? " is-turn" : "");
-      return '<li class="' + cls + '">' +
-        '<span class="seat__idx">P' + (i + 1) + "</span>" +
-        '<span class="seat__name">' + (m ? esc(m.name) : "boş") + "</span>" +
-        (m && m.id === me.id ? '<span class="seat__you">SEN</span>' : "") +
-        (m && m.id === room.hostId ? '<span class="seat__host">SAHİP</span>' : "") +
-        (m && room.hostId === me.id && m.id !== me.id
-          ? '<button class="btn btn--ghost btn--sm" type="button" data-kick="' + m.id + '">AT</button>' : "") +
-        "</li>";
-    }).join("");
+    const red = room.members.filter((m) => m.team === "red");
+    const blue = room.members.filter((m) => m.team === "blue");
+    const spec = room.members.filter((m) => !m.team);
 
-    // izleyici sırası
-    const q = room.queue.map((id) => room.members.find((x) => x.id === id)).filter(Boolean);
-    el.queueCount.textContent = q.length;
-    el.queueList.innerHTML = q.length
-      ? q.map((m) => '<li><span class="qname">' + esc(m.name) + "</span>" +
-          (m.id === me.id ? '<span class="qyou">SEN</span>' : "") +
-          (m.id === room.hostId ? '<span class="qhost">SAHİP</span>' : "") +
-          (room.hostId === me.id && m.id !== me.id
-            ? '<button class="btn btn--ghost btn--sm" type="button" data-kick="' + m.id + '">AT</button>' : "") +
-          "</li>").join("")
-      : '<li class="queue--empty">Sırada kimse yok.</li>';
+    el.redCount.textContent = red.length + "/" + room.teamMax;
+    el.blueCount.textContent = blue.length + "/" + room.teamMax;
+    el.specCount.textContent = spec.length;
+    el.redList.innerHTML = rosterHtml(red, "red");
+    el.blueList.innerHTML = rosterHtml(blue, "blue");
+    el.specList.innerHTML = spec.length ? rosterHtml(spec, null)
+      : '<li class="roster--empty">İzleyici yok.</li>';
 
-    // otur / kalk düğmesi
-    const seatFree = room.seats.indexOf(null) >= 0;
-    if (mySeat >= 0) {
-      el.seatBtn.hidden = false;
-      el.seatBtn.textContent = "SAHADAN KALK";
-      el.seatBtn.disabled = false;
-    } else if (seatFree && !room.match) {
-      el.seatBtn.hidden = false;
-      el.seatBtn.textContent = "SAHAYA OTUR";
-      el.seatBtn.disabled = false;
-    } else {
-      el.seatBtn.hidden = true;
-    }
+    const locked = !!room.match;
+    [[el.joinRed, "red", red], [el.joinBlue, "blue", blue], [el.joinSpec, null, spec]].forEach(([btn, team, list]) => {
+      const iAmHere = myTeam === team;
+      btn.setAttribute("aria-pressed", iAmHere ? "true" : "false");
+      btn.disabled = locked || iAmHere || (team && list.length >= room.teamMax);
+    });
 
-    el.seatHint.textContent = mySeat >= 0 ? "" : " Şu an izliyorsun; sıran gelince otomatik sahaya çıkacaksın.";
+    const canStart = room.hostId === me.id && !room.match && red.length > 0 && blue.length > 0;
+    show(el.startBtn, room.hostId === me.id && !room.match);
+    el.startBtn.disabled = !canStart;
+    el.startBtn.textContent = canStart ? "MAÇI BAŞLAT" : "HER İKİ TAKIM DA DOLU OLMALI";
+
+    el.seatHint.textContent = myTeam
+      ? ""
+      : " İzleyicisin; oynamak için bir takıma geç.";
     updateTurnUI();
   }
 
-  el.seatBtn.addEventListener("click", () => {
-    net.send({ t: mySeat >= 0 ? "stand" : "sit" });
-  });
+  function rosterHtml(list, team) {
+    const turn = room.match ? room.match.turn : -1;
+    return list.map((m) => {
+      const gi = room.match ? gorillaOf(room.match.players, m.id) : -1;
+      const dead = room.match && gi >= 0 && room.match.dead && room.match.dead[gi];
+      const cls = "roster__item" + (team ? " is-" + team : "") +
+        (gi >= 0 && gi === turn ? " is-turn" : "") + (dead ? " is-dead" : "");
+      return '<li class="' + cls + '">' +
+        '<span class="roster__name">' + esc(m.name) + "</span>" +
+        (m.id === me.id ? '<span class="roster__you">SEN</span>' : "") +
+        (m.id === room.hostId ? '<span class="roster__host">SAHİP</span>' : "") +
+        (room.hostId === me.id && m.id !== me.id
+          ? '<button class="btn btn--ghost btn--sm" type="button" data-kick="' + m.id + '">AT</button>' : "") +
+        "</li>";
+    }).join("");
+  }
+
+  function turnTeamOf() {
+    if (!room || !room.match || !room.match.players) return null;
+    const p = room.match.players.find((x) => x.gorilla === room.match.turn);
+    return p ? p.team : null;
+  }
+
+  function nameOfTurn() {
+    if (!room || !room.match || !room.match.players) return "—";
+    const p = room.match.players.find((x) => x.gorilla === room.match.turn);
+    return p ? p.name : "—";
+  }
+
+  el.joinRed.addEventListener("click", () => net.send({ t: "team", team: "red" }));
+  el.joinBlue.addEventListener("click", () => net.send({ t: "team", team: "blue" }));
+  el.joinSpec.addEventListener("click", () => net.send({ t: "team", team: "spec" }));
+  el.startBtn.addEventListener("click", () => net.send({ t: "start" }));
+
   document.addEventListener("click", (e) => {
     const k = e.target.closest("[data-kick]");
     if (k) net.send({ t: "kick", id: k.getAttribute("data-kick") });
@@ -454,15 +474,12 @@
     if (!room) return;
     const url = location.origin + "/#/oda/" + room.id;
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(url).then(
-        () => toast("Oda linki kopyalandı."),
-        () => toast(url)
-      );
+      navigator.clipboard.writeText(url).then(() => toast("Oda linki kopyalandı."), () => toast(url));
     } else toast(url);
   });
 
   function windText(w) {
-    if (Math.abs(w) < 0.05) return "rüzgâr sakin";
+    if (typeof w !== "number" || Math.abs(w) < 0.05) return "rüzgâr sakin";
     return "rüzgâr " + Math.abs(w).toFixed(1) + (w > 0 ? " → sağa" : " ← sola");
   }
 
@@ -474,7 +491,7 @@
       div.className = "msg msg--sys";
       div.textContent = m.text;
     } else {
-      div.className = "msg" + (m.from === me.id ? " msg--me" : "");
+      div.className = "msg" + (m.from === me.id ? " msg--me" : "") + (m.team ? " msg--" + m.team : "");
       div.innerHTML = '<span class="msg__who">' + esc(m.name) + ":</span> " + esc(m.text);
     }
     el.chatLog.appendChild(div);
@@ -503,24 +520,22 @@
 
   net.on("round", (m) => {
     hideOverlay();
-    view.setRound({
-      seed: m.seed, wind: m.wind, gravity: m.gravity,
-      round: m.round, totalRounds: m.totalRounds,
-      scores: m.scores, turn: m.turn, names: m.names, theme: m.theme
-    });
+    view.setRound(m);
     // Maç sunucuda "round" ile başlar; oda durumu ayrıca gelmediği için
     // yerel maç kaydını burada kuruyoruz, yoksa sıra hiç açılmıyor.
     if (room) {
       room.match = Object.assign(room.match || {}, {
         round: m.round, totalRounds: m.totalRounds, scores: m.scores,
-        turn: m.turn, wind: m.wind, gravity: m.gravity, phase: "aim"
+        wind: m.wind, gravity: m.gravity, players: m.players,
+        red: m.red, blue: m.blue, dead: m.players.map(() => false), phase: "aim"
       });
+      myGorilla = gorillaOf(m.players, me.id);
     }
     el.roundLabel.textContent = "RAUNT " + m.round + "/" + m.totalRounds;
     el.windLabel.textContent = windText(m.wind);
-    el.s1val.textContent = m.scores[0];
-    el.s2val.textContent = m.scores[1];
-    if (m.names) { el.s1name.textContent = m.names[0]; el.s2name.textContent = m.names[1]; }
+    el.redVal.textContent = m.scores.red;
+    el.blueVal.textContent = m.scores.blue;
+    renderRoom();
   });
 
   net.on("turn", (m) => {
@@ -528,46 +543,53 @@
     view.setTurn(m.turn);
     if (room && room.match) room.match.turn = m.turn;
     startTimer(m.seconds || (room ? room.settings.turnSeconds : 30));
-    document.querySelector(".score--p1").classList.toggle("is-turn", m.turn === 0);
-    document.querySelector(".score--p2").classList.toggle("is-turn", m.turn === 1);
-    updateTurnUI();
+    renderRoom();
     if (isMyTurn()) {
       sendAim();
       if (document.activeElement === document.body) el.ang.focus();
     }
   });
 
-  net.on("aim", (m) => { view.setAim(m.seat, m.angle, m.velocity); });
+  net.on("aim", (m) => { view.setAim(m.shooter, m.angle, m.velocity); });
 
   net.on("shot", (m) => {
     phase = "resolving";
     stopTimer();
     setControls(false);
     el.turnText.textContent = "Muz havada…";
-    // Canlandırma bitince metni bekleyen duruma bırak; sıradaki "turn"
-    // mesajı zaten hemen ardından geliyor.
     view.playShot(m, () => { if (phase === "resolving") el.turnText.textContent = "Sonuç bekleniyor…"; });
+    if (room && room.match && m.impact.victim >= 0 && room.match.dead) {
+      room.match.dead[m.impact.victim] = true;
+    }
   });
 
   net.on("roundEnd", (m) => {
     phase = "roundover";
-    view.scores = m.scores.slice();
-    el.s1val.textContent = m.scores[0];
-    el.s2val.textContent = m.scores[1];
+    view.scores = { red: m.scores.red, blue: m.scores.blue };
+    el.redVal.textContent = m.scores.red;
+    el.blueVal.textContent = m.scores.blue;
     if (room && room.match) room.match.scores = m.scores;
-    setTimeout(() => view.startDance(m.winner), 400);
-    el.turnText.innerHTML = "<b>" + esc(seatName(m.winner)) + "</b> raundu aldı.";
+    if (m.winner) setTimeout(() => view.startDance(m.winner), 400);
+    el.turnText.innerHTML = m.winner
+      ? "<b>" + TEAM_TR[m.winner] + "</b> raundu aldı."
+      : "Raunt berabere bitti.";
   });
 
   net.on("matchEnd", (m) => {
     phase = "matchover";
     stopTimer();
     setControls(false);
-    const title = m.winner < 0 ? "BERABERE" : esc(m.names[m.winner]).toLocaleUpperCase("tr") + " KAZANDI";
-    overlay(title, m.names[0] + " " + m.scores[0] + "  —  " + m.scores[1] + " " + m.names[1]);
+    const title = m.winner ? TEAM_TR[m.winner].toLocaleUpperCase("tr") + " KAZANDI" : "BERABERE";
+    overlay(title, "Kırmızı " + m.scores.red + "  —  " + m.scores.blue + " Mavi");
     if (room) room.match = null;
     el.turnText.textContent = "Maç bitti.";
-    setTimeout(() => { if (phase === "matchover") hideOverlay(); }, 4500);
+    setTimeout(() => {
+      if (phase !== "matchover") return;
+      hideOverlay();
+      phase = "idle";
+      view.clear("MAÇ BEKLENİYOR");
+      renderRoom();
+    }, 4500);
   });
 
   function overlay(title, text) {
@@ -579,7 +601,8 @@
 
   /* ---------- tur kontrolü ---------- */
   function isMyTurn() {
-    return !!room && !!room.match && mySeat >= 0 && room.match.turn === mySeat && phase === "aim";
+    return !!room && !!room.match && myGorilla >= 0 &&
+      room.match.turn === myGorilla && phase === "aim";
   }
 
   function setControls(on) {
@@ -590,17 +613,19 @@
     if (!room) return;
     if (!room.match) {
       setControls(false);
-      const need = room.seats.filter((s) => !s).length;
-      el.turnText.textContent = need
-        ? "Oyuncular bekleniyor (" + (2 - need) + "/2)…"
-        : "Maç birazdan başlıyor…";
+      const red = room.members.filter((m) => m.team === "red").length;
+      const blue = room.members.filter((m) => m.team === "blue").length;
+      el.turnText.textContent = (red && blue)
+        ? "Takımlar hazır, oda sahibi maçı başlatabilir."
+        : "Her iki takımda da en az bir oyuncu gerekiyor (" + red + "-" + blue + ").";
       return;
     }
     const my = isMyTurn();
     setControls(my);
     if (phase === "resolving") el.turnText.textContent = "Muz havada…";
     else if (my) el.turnText.innerHTML = "<b>SIRA SENDE</b> · " + windText(room.match.wind);
-    else el.turnText.innerHTML = "Sıra: <b>" + esc(seatName(room.match.turn)) + "</b> · " + windText(room.match.wind);
+    else el.turnText.innerHTML = "Sıra: <b>" + esc(nameOfTurn()) + "</b> (" +
+      (TEAM_TR[turnTeamOf()] || "—") + ") · " + windText(room.match.wind);
   }
 
   function readouts() {
@@ -610,7 +635,7 @@
 
   let aimTimer = 0;
   function sendAim() {
-    view.setAim(mySeat, +el.ang.value, +el.vel.value);
+    view.setAim(myGorilla, +el.ang.value, +el.vel.value);
     if (aimTimer) return;
     aimTimer = setTimeout(() => {
       aimTimer = 0;

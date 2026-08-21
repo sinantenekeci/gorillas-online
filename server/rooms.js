@@ -1,6 +1,10 @@
 /* Oda ve maç mantığı. Taşıma katmanından bağımsızdır: her istemci yalnızca
    {id, name, send(obj)} arayüzüyle temsil edilir, böylece WebSocket olmadan
-   da test edilebilir. Zamanlayıcı dışarıdan verilebilir (testlerde kısaltılır). */
+   da test edilebilir. Zamanlayıcı dışarıdan verilebilir (testlerde kısaltılır).
+
+   Takım düzeni Haxball mantığındadır: oyuncular kırmızı/mavi/izleyici
+   arasında serbestçe geçer, maçı oda sahibi başlatır. Otomatik koltuk devri
+   yoktur; kimin oynayacağına oyuncular karar verir. */
 "use strict";
 
 const crypto = require("crypto");
@@ -14,12 +18,14 @@ const CHAT_WINDOW_MS = 4000;
 const AIM_MIN_INTERVAL_MS = 60;
 const LOBBY_DEBOUNCE_MS = 200;
 const MAX_ROOMS = 200;
+const TEAM_MAX = 4;                 // sahada takım başına en fazla oyuncu
+const TEAMS = ["red", "blue"];
 
 const DEFAULTS = {
   rounds: 3,
   gravity: 9.8,
   windOn: true,
-  maxPlayers: 8,
+  maxPlayers: 16,
   turnSeconds: 30,
   theme: "day"
 };
@@ -62,7 +68,7 @@ function normalizeSettings(raw) {
     rounds: clamp(Math.round(raw.rounds), 1, 15, DEFAULTS.rounds),
     gravity: [1.6, 9.8, 24.8].indexOf(grav) >= 0 ? grav : DEFAULTS.gravity,
     windOn: raw.windOn !== false && raw.windOn !== 0 && raw.windOn !== "0",
-    maxPlayers: clamp(Math.round(raw.maxPlayers), 2, 16, DEFAULTS.maxPlayers),
+    maxPlayers: clamp(Math.round(raw.maxPlayers), 2, 24, DEFAULTS.maxPlayers),
     turnSeconds: clamp(Math.round(raw.turnSeconds), 10, 120, DEFAULTS.turnSeconds),
     theme: raw.theme === "night" ? "night" : "day"
   };
@@ -95,6 +101,7 @@ class Hub {
   addClient(client) {
     client.name = clean(client.name, MAX_NAME) || "Goril";
     client.roomId = null;
+    client.team = null;
     client.chatStamps = [];
     client.lastAim = 0;
     this.clients.set(client.id, client);
@@ -128,7 +135,10 @@ class Hub {
         playing: !!r.match,
         rounds: r.settings.rounds,
         gravity: r.settings.gravity,
-        windOn: r.settings.windOn
+        windOn: r.settings.windOn,
+        theme: r.settings.theme,
+        red: this.teamOf(r, "red").length,
+        blue: this.teamOf(r, "blue").length
       });
     }
     out.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "tr"));
@@ -160,8 +170,6 @@ class Hub {
       passHash: hashPass(clean(msg.password, 64)),
       hostId: client.id,
       members: [],
-      seats: [null, null],
-      queue: [],
       settings: normalizeSettings(msg.settings),
       match: null,
       starting: false,
@@ -191,36 +199,36 @@ class Hub {
     return candidate;
   }
 
+  /* Yeni gelen, boş yeri olan takıma otomatik yerleşir; maç sürüyorsa izleyici
+     kalır. Böylece odaya ilk giren iki kişi düğmeye basmadan oynayabilir. */
   joinRoom(client, room, asHost) {
     client.name = this.uniqueName(room, client.name);
     client.roomId = room.id;
+    client.team = null;
     room.members.push(client);
     if (asHost) room.hostId = client.id;
 
-    const free = room.seats.indexOf(null);
-    if (free >= 0 && !room.match) room.seats[free] = client.id;
-    else room.queue.push(client.id);
+    if (!room.match) {
+      const red = this.teamOf(room, "red").length;
+      const blue = this.teamOf(room, "blue").length;
+      if (red <= blue && red < TEAM_MAX) client.team = "red";
+      else if (blue < TEAM_MAX) client.team = "blue";
+    }
 
     this.send(client, { t: "joined", roomId: room.id, name: client.name });
     this.sys(room, client.name + " odaya katıldı.");
     this.pushRoomState(room);
     this.broadcastRoomList();
-    this.maybeStart(room);
   }
 
   leaveRoom(client, silent) {
     const room = this.rooms.get(client.roomId);
     client.roomId = null;
+    const wasTeam = client.team;
+    client.team = null;
     if (!room) { if (!silent) this.send(client, { t: "left" }); return; }
 
     room.members = room.members.filter((m) => m.id !== client.id);
-    room.queue = room.queue.filter((id) => id !== client.id);
-
-    const seat = room.seats.indexOf(client.id);
-    if (seat >= 0) {
-      room.seats[seat] = null;
-      if (room.match) this.forfeit(room, seat, client.name + " oyundan ayrıldı.");
-    }
     if (room.hostId === client.id && room.members.length) room.hostId = room.members[0].id;
 
     if (!room.members.length) {
@@ -228,9 +236,8 @@ class Hub {
       this.rooms.delete(room.id);
     } else {
       this.sys(room, client.name + " odadan ayrıldı.");
-      this.fillSeats(room);
+      if (room.match && wasTeam) this.dropFromMatch(room, client.id, client.name + " oyundan ayrıldı.");
       this.pushRoomState(room);
-      this.maybeStart(room);
     }
     if (!silent) {
       this.send(client, { t: "left" });
@@ -239,81 +246,92 @@ class Hub {
     this.broadcastRoomList();
   }
 
-  /* ---------- koltuklar ---------- */
-  fillSeats(room) {
-    if (room.match) return;
-    for (let s = 0; s < 2; s++) {
-      if (room.seats[s] === null && room.queue.length) room.seats[s] = room.queue.shift();
-    }
+  /* ---------- takımlar ---------- */
+  teamOf(room, team) {
+    return room.members.filter((m) => m.team === team);
   }
 
-  sit(client) {
+  setTeam(client, msg) {
     const room = this.rooms.get(client.roomId);
     if (!room) return;
-    if (room.seats.indexOf(client.id) >= 0) return;
-    if (room.match) return this.err(client, "Maç sürüyor, sıranı bekle.");
-    const free = room.seats.indexOf(null);
-    if (free < 0) return this.err(client, "Koltuklar dolu.");
-    room.queue = room.queue.filter((id) => id !== client.id);
-    room.seats[free] = client.id;
+    if (room.match) return this.err(client, "Maç sürüyor, bitmesini bekle.");
+    const want = msg.team === "red" || msg.team === "blue" ? msg.team : null;
+    if (want && this.teamOf(room, want).length >= TEAM_MAX && client.team !== want) {
+      return this.err(client, "Takım dolu (en fazla " + TEAM_MAX + " kişi).");
+    }
+    if (client.team === want) return;
+    client.team = want;
     this.pushRoomState(room);
-    this.maybeStart(room);
-  }
-
-  stand(client) {
-    const room = this.rooms.get(client.roomId);
-    if (!room) return;
-    const seat = room.seats.indexOf(client.id);
-    if (seat < 0) return;
-    room.seats[seat] = null;
-    room.queue.push(client.id);
-    if (room.match) {
-      this.forfeit(room, seat, client.name + " sahayı bıraktı.");
-    } else {
-      this.fillSeats(room);
-      this.pushRoomState(room);
-      this.maybeStart(room);
-    }
+    this.broadcastRoomList();
   }
 
   /* ---------- maç akışı ---------- */
-  maybeStart(room) {
+  startMatch(client) {
+    const room = this.rooms.get(client.roomId);
+    if (!room) return;
+    if (room.hostId !== client.id) return this.err(client, "Maçı yalnızca oda sahibi başlatabilir.");
     if (room.match || room.starting) return;
-    if (room.seats[0] === null || room.seats[1] === null) return;
+    const red = this.teamOf(room, "red"), blue = this.teamOf(room, "blue");
+    if (!red.length || !blue.length) return this.err(client, "Her iki takımda da en az bir oyuncu olmalı.");
+
     room.starting = true;
     this.broadcast(room, { t: "countdown", seconds: 3 });
     this.stopTimer(room);
     room.timer = this.setTimeout(() => {
       room.starting = false;
-      if (room.seats[0] === null || room.seats[1] === null) { this.pushRoomState(room); return; }
-      this.startMatch(room);
+      const r = this.teamOf(room, "red"), b = this.teamOf(room, "blue");
+      if (!r.length || !b.length) { this.pushRoomState(room); return; }
+      this.beginMatch(room);
     }, this.wait(3000));
   }
 
-  startMatch(room) {
+  beginMatch(room) {
     room.match = {
-      scores: [0, 0],
+      scores: { red: 0, blue: 0 },
       round: 0,
       totalRounds: room.settings.rounds,
       state: null,
+      players: [],
+      order: [],
+      turnPos: 0,
+      turn: -1,
       phase: "aim",
-      turn: 0,
       turnEndsAt: 0
     };
-    this.sys(room, "Maç başladı: " + this.seatName(room, 0) + " - " + this.seatName(room, 1));
+    this.sys(room, "Maç başladı: Kırmızı " + this.teamOf(room, "red").length +
+      " - " + this.teamOf(room, "blue").length + " Mavi");
     this.broadcastRoomList();
     this.startRound(room);
-    this.pushRoomState(room);   // sahne kurulduktan sonra: match.state artık dolu
+    this.pushRoomState(room);
   }
 
   startRound(room) {
     const m = room.match;
+    const red = this.teamOf(room, "red"), blue = this.teamOf(room, "blue");
     m.round++;
     m.state = core.createRound(core.makeSeed(), {
       gravity: room.settings.gravity,
-      windOn: room.settings.windOn
+      windOn: room.settings.windOn,
+      red: red.length,
+      blue: blue.length
     });
-    m.turn = (m.round - 1) % 2;
+
+    /* Goril dizisi önce kırmızıları sonra mavileri içerir; oyuncular aynı
+       sırayla eşleşir. Sıra düzeni takımlar arasında dönüşümlüdür. */
+    m.players = [];
+    red.forEach((c, i) => m.players.push({ id: c.id, name: c.name, team: "red", gorilla: i }));
+    blue.forEach((c, i) => m.players.push({ id: c.id, name: c.name, team: "blue", gorilla: red.length + i }));
+
+    m.order = [];
+    const maxLen = Math.max(red.length, blue.length);
+    for (let i = 0; i < maxLen; i++) {
+      if (i < red.length) m.order.push(i);
+      if (i < blue.length) m.order.push(red.length + i);
+    }
+    // tek sayılı raunttlarda kırmızı, çift sayılılarda mavi başlar
+    if (m.round % 2 === 0) m.order.reverse();
+
+    m.turnPos = -1;
     m.phase = "aim";
     this.broadcast(room, {
       t: "round",
@@ -324,10 +342,37 @@ class Hub {
       round: m.round,
       totalRounds: m.totalRounds,
       scores: m.scores,
-      turn: m.turn,
-      names: [this.seatName(room, 0), this.seatName(room, 1)]
+      players: m.players,
+      red: red.length,
+      blue: blue.length
     });
-    this.armTurn(room);
+    this.nextTurn(room);
+  }
+
+  livingOf(room, team) {
+    const m = room.match;
+    return m.players.filter((p) => p.team === team && !m.state.gorillas[p.gorilla].dead);
+  }
+
+  playerByGorilla(room, gi) {
+    return room.match.players.find((p) => p.gorilla === gi) || null;
+  }
+
+  /* Sırayı, gorili hayatta olan bir sonraki oyuncuya taşır. */
+  nextTurn(room) {
+    const m = room.match;
+    if (!m || !m.order.length) return;
+    for (let step = 1; step <= m.order.length; step++) {
+      const pos = (m.turnPos + step) % m.order.length;
+      const gi = m.order[pos];
+      if (!m.state.gorillas[gi].dead) {
+        m.turnPos = pos;
+        m.turn = gi;
+        m.phase = "aim";
+        this.armTurn(room);
+        return;
+      }
+    }
   }
 
   armTurn(room) {
@@ -342,9 +387,9 @@ class Hub {
     this.stopTimer(room);
     room.timer = this.setTimeout(() => {
       if (!room.match || room.match.phase !== "aim") return;
-      this.sys(room, this.seatName(room, room.match.turn) + " süreyi kaçırdı, sıra geçti.");
-      room.match.turn = 1 - room.match.turn;
-      this.armTurn(room);
+      const p = this.playerByGorilla(room, room.match.turn);
+      this.sys(room, (p ? p.name : "Oyuncu") + " süreyi kaçırdı, sıra geçti.");
+      this.nextTurn(room);
     }, this.wait(room.settings.turnSeconds * 1000));
   }
 
@@ -352,18 +397,19 @@ class Hub {
     const room = this.rooms.get(client.roomId);
     if (!room || !room.match) return;
     const m = room.match;
-    const seat = room.seats.indexOf(client.id);
-    if (seat < 0 || seat !== m.turn || m.phase !== "aim") return;
+    if (m.phase !== "aim") return;
+    const p = this.playerByGorilla(room, m.turn);
+    if (!p || p.id !== client.id) return;
 
     const angle = Math.round(clamp(msg.angle, 0, 90, 45));
     const velocity = Math.round(clamp(msg.velocity, 1, 200, 50));
-    const shot = core.simulateShot(m.state, seat, angle, velocity);
+    const shot = core.simulateShot(m.state, m.turn, angle, velocity);
 
     m.phase = "resolving";
     this.stopTimer(room);
     this.broadcast(room, {
       t: "shot",
-      seat: seat,
+      shooter: m.turn,
       angle: angle,
       velocity: velocity,
       frames: shot.frames,
@@ -383,65 +429,75 @@ class Hub {
     if (!room.match) return;
     const m = room.match;
     if (shot.impact.victim >= 0) {
-      const winner = 1 - shot.impact.victim;
-      m.scores[winner]++;
-      m.phase = "roundover";
-      this.broadcast(room, { t: "roundEnd", winner: winner, scores: m.scores });
-      this.sys(room, this.seatName(room, winner) + " raundu aldı (" + m.scores[0] + "-" + m.scores[1] + ").");
-      room.timer = this.setTimeout(() => {
-        if (!room.match) return;
-        if (m.round >= m.totalRounds) this.endMatch(room);
-        else this.startRound(room);
-      }, this.wait(2600));
-    } else {
-      m.turn = 1 - m.turn;
-      m.phase = "aim";
-      this.armTurn(room);
+      const victim = this.playerByGorilla(room, shot.impact.victim);
+      if (victim) this.sys(room, victim.name + " vuruldu.");
     }
+    if (this.checkRoundOver(room)) return;
+    this.nextTurn(room);
   }
 
-  forfeit(room, seat, reason) {
-    if (!room.match) return;
-    this.sys(room, reason);
-    this.endMatch(room, 1 - seat);
+  /* Bir takımın tüm gorilleri öldüyse raunt biter. true dönerse sıra ilerlemez. */
+  checkRoundOver(room) {
+    const m = room.match;
+    const redAlive = this.livingOf(room, "red").length;
+    const blueAlive = this.livingOf(room, "blue").length;
+    if (redAlive && blueAlive) return false;
+
+    let winner = null;
+    if (redAlive && !blueAlive) winner = "red";
+    else if (blueAlive && !redAlive) winner = "blue";
+
+    m.phase = "roundover";
+    if (winner) m.scores[winner]++;
+    this.broadcast(room, { t: "roundEnd", winner: winner, scores: m.scores });
+    this.sys(room, winner
+      ? (winner === "red" ? "Kırmızı" : "Mavi") + " raundu aldı (" +
+        m.scores.red + "-" + m.scores.blue + ")."
+      : "Raunt berabere bitti.");
+
+    this.stopTimer(room);
+    room.timer = this.setTimeout(() => {
+      if (!room.match) return;
+      if (m.round >= m.totalRounds) this.endMatch(room);
+      else this.startRound(room);
+    }, this.wait(2600));
+    return true;
   }
 
-  endMatch(room, forcedWinner) {
+  /* Oyuncu maç ortasında koptuğunda gorili ölür; takımı tükendiyse raunt biter. */
+  dropFromMatch(room, id, reason) {
+    const m = room.match;
+    if (!m) return;
+    const p = m.players.find((x) => x.id === id);
+    if (!p) return;
+    const g = m.state.gorillas[p.gorilla];
+    if (g && !g.dead) {
+      g.dead = true;
+      this.sys(room, reason);
+    }
+    if (m.phase === "resolving") return;      // atış çözülünce zaten bakılacak
+    if (this.checkRoundOver(room)) return;
+    if (m.turn === p.gorilla) this.nextTurn(room);
+    else this.pushRoomState(room);
+  }
+
+  endMatch(room) {
     const m = room.match;
     if (!m) return;
     this.stopTimer(room);
-    const winner = typeof forcedWinner === "number"
-      ? forcedWinner
-      : (m.scores[0] === m.scores[1] ? -1 : (m.scores[0] > m.scores[1] ? 0 : 1));
-    const names = [this.seatName(room, 0), this.seatName(room, 1)];
+    const winner = m.scores.red === m.scores.blue ? null
+      : (m.scores.red > m.scores.blue ? "red" : "blue");
     room.match = null;
-    this.broadcast(room, { t: "matchEnd", winner: winner, scores: m.scores, names: names });
-    this.sys(room, winner < 0 ? "Berabere." : names[winner] + " maçı kazandı.");
-    this.rotateSeats(room, winner);
+    this.broadcast(room, { t: "matchEnd", winner: winner, scores: m.scores });
+    this.sys(room, winner
+      ? (winner === "red" ? "Kırmızı" : "Mavi") + " takım maçı kazandı."
+      : "Maç berabere bitti.");
     this.pushRoomState(room);
     this.broadcastRoomList();
-    this.stopTimer(room);
-    room.timer = this.setTimeout(() => this.maybeStart(room), this.wait(2500));
-  }
-
-  /* Kazanan koltuğunda kalır, kaybeden sıra sonuna gider, sıradaki izleyici oturur.
-     Sıra boşsa kimse kalkmaz; aynı ikili rövanş oynar. */
-  rotateSeats(room, winner) {
-    if (!room.queue.length) return;
-    const loserSeat = winner < 0 ? 1 : 1 - winner;
-    const loserId = room.seats[loserSeat];
-    if (loserId) {
-      room.seats[loserSeat] = null;
-      room.queue.push(loserId);
-    }
-    this.fillSeats(room);
-    const next = room.seats[loserSeat];
-    if (next && next !== loserId) this.sys(room, this.nameOf(next) + " sahaya çıktı.");
   }
 
   /* ---------- yardımcılar ---------- */
   nameOf(id) { const c = this.clients.get(id); return c ? c.name : "?"; }
-  seatName(room, seat) { return room.seats[seat] ? this.nameOf(room.seats[seat]) : "-"; }
 
   broadcast(room, msg) {
     for (const m of room.members) this.send(m, msg);
@@ -467,10 +523,9 @@ class Hub {
       name: room.name,
       hasPassword: !!room.passHash,
       hostId: room.hostId,
+      teamMax: TEAM_MAX,
       settings: room.settings,
-      members: room.members.map((c) => ({ id: c.id, name: c.name, seat: room.seats.indexOf(c.id) })),
-      seats: room.seats,
-      queue: room.queue.slice(),
+      members: room.members.map((c) => ({ id: c.id, name: c.name, team: c.team })),
       match: (m && m.state) ? {
         round: m.round,
         totalRounds: m.totalRounds,
@@ -478,11 +533,14 @@ class Hub {
         turn: m.turn,
         phase: m.phase,
         turnEndsAt: m.turnEndsAt,
+        players: m.players,
         seed: m.state.seed,
         wind: m.state.wind,
         gravity: m.state.gravity,
         craters: m.state.craters,
         dead: m.state.gorillas.map((g) => g.dead),
+        red: m.state.gorillas.filter((g) => g.team === "red").length,
+        blue: m.state.gorillas.filter((g) => g.team === "blue").length,
         sunHit: m.state.sunHit
       } : null
     };
@@ -501,22 +559,27 @@ class Hub {
     client.chatStamps = client.chatStamps.filter((s) => now - s < CHAT_WINDOW_MS);
     if (client.chatStamps.length >= CHAT_BURST) return this.err(client, "Çok hızlı yazıyorsun.");
     client.chatStamps.push(now);
-    this.broadcast(room, { t: "chat", from: client.id, name: client.name, text: text, ts: now });
+    this.broadcast(room, {
+      t: "chat", from: client.id, name: client.name,
+      team: client.team, text: text, ts: now
+    });
   }
 
   /* Sırası gelen oyuncunun kaydırıcı hareketi diğerlerine yansır. */
   aim(client, msg) {
     const room = this.rooms.get(client.roomId);
     if (!room || !room.match) return;
-    const seat = room.seats.indexOf(client.id);
-    if (seat < 0 || seat !== room.match.turn) return;
+    const p = this.playerByGorilla(room, room.match.turn);
+    if (!p || p.id !== client.id) return;
     const now = this.now();
     if (now - client.lastAim < AIM_MIN_INTERVAL_MS) return;
     client.lastAim = now;
     const angle = Math.round(clamp(msg.angle, 0, 90, 45));
     const velocity = Math.round(clamp(msg.velocity, 1, 200, 50));
     for (const m of room.members) {
-      if (m.id !== client.id) this.send(m, { t: "aim", seat: seat, angle: angle, velocity: velocity });
+      if (m.id !== client.id) {
+        this.send(m, { t: "aim", shooter: room.match.turn, angle: angle, velocity: velocity });
+      }
     }
   }
 
@@ -565,8 +628,8 @@ class Hub {
       case "join": return this.joinById(client, msg);
       case "leave": return this.leaveRoom(client, false);
       case "chat": return this.chat(client, msg);
-      case "sit": return this.sit(client);
-      case "stand": return this.stand(client);
+      case "team": return this.setTeam(client, msg);
+      case "start": return this.startMatch(client);
       case "fire": return this.fire(client, msg);
       case "aim": return this.aim(client, msg);
       case "rename": return this.rename(client, msg);
@@ -578,4 +641,4 @@ class Hub {
   }
 }
 
-module.exports = { Hub, normalizeSettings, clean, clamp, DEFAULTS, MAX_NAME, MAX_CHAT };
+module.exports = { Hub, normalizeSettings, clean, clamp, DEFAULTS, TEAM_MAX, TEAMS, MAX_NAME, MAX_CHAT };

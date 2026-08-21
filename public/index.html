@@ -91,9 +91,9 @@
     <section class="howto">
       <h3 class="h-section">NASIL OYNANIR</h3>
       <ol class="howto__list">
-        <li><b>Odaya gir.</b> İki oyuncu sahaya oturur, kalanlar izler ve sohbet eder.</li>
-        <li><b>Açı ve hızı ayarla.</b> Rüzgâr muzu iter, yerçekimi aşağı çeker.</li>
-        <li><b>Vur ve devral.</b> Maçı kazanan koltuğunda kalır, kaybeden sıranın sonuna geçer.</li>
+        <li><b>Takım seç.</b> Kırmızı ya da maviye geç; takım başına en fazla 4 kişi sahaya çıkar, kalanlar izler ve sohbet eder.</li>
+        <li><b>Açı ve hızı ayarla.</b> Rüzgâr muzu iter, yerçekimi aşağı çeker. Sıra takımlar arasında dönüşümlü ilerler.</li>
+        <li><b>Rakip takımı temizle.</b> Bir takımın tüm gorilleri düşünce raunt biter; çok raunt alan maçı kazanır.</li>
       </ol>
     </section>
   </section>
@@ -116,23 +116,23 @@
       </div>
 
       <div class="scoreboard">
-        <div class="score score--p1">
-          <span class="score__name" id="s1name">—</span>
-          <span class="score__val" id="s1val">0</span>
+        <div class="score score--red">
+          <span class="score__name">KIRMIZI</span>
+          <span class="score__val" id="redVal">0</span>
         </div>
         <div class="score__mid">
           <span id="roundLabel">RAUNT –/–</span>
           <span id="windLabel" class="muted">rüzgâr yok</span>
         </div>
-        <div class="score score--p2">
-          <span class="score__val" id="s2val">0</span>
-          <span class="score__name" id="s2name">—</span>
+        <div class="score score--blue">
+          <span class="score__val" id="blueVal">0</span>
+          <span class="score__name">MAVİ</span>
         </div>
       </div>
 
       <div id="stage" class="stage">
-        <canvas id="c" width="640" height="400" role="img"
-                aria-label="Gökdelenlerin üzerindeki iki goril ve atılan muz"></canvas>
+        <canvas id="c" width="960" height="400" role="img"
+                aria-label="Gökdelenlerin üzerinde kırmızı ve mavi takımın gorilleri, aralarında uçan muz"></canvas>
         <div id="overlay" class="overlay" hidden>
           <h3 id="overlayTitle">BEKLENİYOR</h3>
           <p id="overlayText" class="muted"></p>
@@ -167,17 +167,26 @@
 
     <aside class="room__side">
       <section class="panel panel--players">
-        <h3 class="panel__title">
-          <svg class="ic" aria-hidden="true"><use href="#i-seat"/></svg> SAHADA
-        </h3>
-        <ul id="seatList" class="seats"></ul>
-        <button id="seatBtn" class="btn btn--ghost btn--sm btn--full" type="button" hidden>SAHAYA OTUR</button>
+        <div class="teams">
+          <div class="team team--red">
+            <h3 class="panel__title">KIRMIZI <span id="redCount" class="badge">0</span></h3>
+            <ul id="redList" class="roster"></ul>
+            <button id="joinRed" class="btn btn--sm btn--full" type="button">GEÇ</button>
+          </div>
+          <div class="team team--blue">
+            <h3 class="panel__title">MAVİ <span id="blueCount" class="badge">0</span></h3>
+            <ul id="blueList" class="roster"></ul>
+            <button id="joinBlue" class="btn btn--sm btn--full" type="button">GEÇ</button>
+          </div>
+        </div>
 
         <h3 class="panel__title">
-          <svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg> SIRADA
-          <span id="queueCount" class="badge">0</span>
+          <svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg> İZLEYİCİ
+          <span id="specCount" class="badge">0</span>
         </h3>
-        <ol id="queueList" class="queue"></ol>
+        <ul id="specList" class="roster"></ul>
+        <button id="joinSpec" class="btn btn--ghost btn--sm btn--full" type="button">İZLEYİCİYE GEÇ</button>
+        <button id="startBtn" class="btn btn--accent btn--full" type="button" hidden>MAÇI BAŞLAT</button>
       </section>
 
       <section class="panel panel--chat">

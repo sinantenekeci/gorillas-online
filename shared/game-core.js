@@ -8,9 +8,9 @@
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
-  var W = 640, H = 400;          // sahne olculeri
+  var W = 960, H = 400;          // sahne olculeri (4e4 icin genisletildi)
   var GW = 24, GH = 34;          // goril kutusu
-  var SUN = { x: 320, y: 34, r: 12 };
+  var SUN = { x: 480, y: 34, r: 12 };
   var DT = 0.01, SUB = 5;        // kare basina 0.05 sn fizik
   var BCOL = ["#A80000", "#A8A8A8", "#00A8A8"];
   var MAX_FLIGHT = 40;           // saniye
@@ -52,14 +52,49 @@
     return buildings;
   }
 
-  function placeGorillas(buildings, rnd) {
+  /* lo..hi bina araligindan artan sirali, tekrarsiz "count" adet indeks secer.
+     Goriller boylece yigilmadan sahaya dagilir. */
+  function pickSlots(count, lo, hi, rnd) {
+    var out = [], avail = hi - lo + 1, i;
+    if (count >= avail) {
+      for (i = 0; i < count; i++) out.push(Math.min(hi, lo + i));
+      return out;
+    }
+    var step = avail / count, cur = lo - 1;
+    for (i = 0; i < count; i++) {
+      var start = Math.floor(lo + i * step);
+      var end = Math.floor(lo + (i + 1) * step) - 1;
+      if (end < start) end = start;
+      var idx = start + Math.floor(rnd() * (end - start + 1));
+      if (idx <= cur) idx = cur + 1;
+      if (idx > hi) idx = hi;
+      out.push(idx);
+      cur = idx;
+    }
+    return out;
+  }
+
+  /* Kirmizi takim sahanin solunu, mavi takim sagini tutar; her goril kendi
+     takiminin yonune (facing) dogru atar. Tek kisilik takimlarda bu, eski
+     iki oyunculu duzenin aynisidir. */
+  function placeGorillas(buildings, rnd, redCount, blueCount) {
+    if (typeof redCount !== "number") redCount = 1;
+    if (typeof blueCount !== "number") blueCount = 1;
     var n = buildings.length;
-    var li = Math.min(1 + Math.floor(rnd() * 2), n - 1);
-    var ri = Math.min(Math.max(n - 2 - Math.floor(rnd() * 2), li + 1), n - 1);
-    return [li, ri].map(function (i) {
-      var b = buildings[i];
-      return { x: Math.round(b.x + b.w / 2), y: b.y - GH, dead: false };
-    });
+    var mid = Math.floor(n / 2);
+    var reds = pickSlots(redCount, 1, Math.max(1, mid - 1), rnd);
+    var blues = pickSlots(blueCount, Math.min(mid, n - 2), n - 2, rnd);
+    var out = [];
+    function push(idx, team, facing) {
+      var b = buildings[Math.max(0, Math.min(idx, n - 1))];
+      out.push({
+        x: Math.round(b.x + b.w / 2), y: b.y - GH,
+        dead: false, team: team, facing: facing
+      });
+    }
+    reds.forEach(function (i) { push(i, "red", 1); });
+    blues.forEach(function (i) { push(i, "blue", -1); });
+    return out;
   }
 
   /* ---------- bulutlar ----------
@@ -109,7 +144,7 @@
     opts = opts || {};
     var rnd = mulberry32(seed);
     var buildings = makeCity(rnd);
-    var gorillas = placeGorillas(buildings, rnd);
+    var gorillas = placeGorillas(buildings, rnd, opts.red, opts.blue);
     var windOn = opts.windOn !== false;
     return {
       seed: seed,
@@ -146,9 +181,15 @@
     return x > g.x - GW / 2 && x < g.x + GW / 2 && y > g.y && y < g.y + GH;
   }
 
+  function facingOf(state, shooter) {
+    var g = state.gorillas[shooter];
+    if (g && typeof g.facing === "number") return g.facing;
+    return shooter === 0 ? 1 : -1;          // takimsiz eski duzen
+  }
+
   function muzzle(state, shooter) {
     var g = state.gorillas[shooter];
-    return { x: g.x + (shooter === 0 ? 10 : -10), y: g.y - 8 };
+    return { x: g.x + 10 * facingOf(state, shooter), y: g.y - 8 };
   }
 
   /* ---------- atis simulasyonu ----------
@@ -156,7 +197,7 @@
      Math.cos/sin motorlar arasi bit-esdegerli olmadigi icin yorunge
      istemcide yeniden hesaplanmaz, sunucudan hazir gelir. */
   function simulateShot(state, shooter, angle, velocity) {
-    var a = (shooter === 0 ? angle : 180 - angle) * Math.PI / 180;
+    var a = (facingOf(state, shooter) > 0 ? angle : 180 - angle) * Math.PI / 180;
     var m = muzzle(state, shooter);
     var vx = velocity * Math.cos(a), vy = velocity * Math.sin(a);
     var w = state.wind, G = state.gravity;
@@ -176,7 +217,7 @@
           impact = { type: "out", x: x, y: y, victim: -1 };
           break;
         }
-        for (i = 0; i < 2; i++) {
+        for (i = 0; i < state.gorillas.length; i++) {
           if (i === shooter && t < 0.25) continue;
           if (hitsGorilla(state, x, y, i)) {
             impact = { type: "gorilla", x: x, y: y, victim: i };
@@ -211,6 +252,8 @@
   return {
     W: W, H: H, GW: GW, GH: GH, SUN: SUN, DT: DT, SUB: SUB, BCOL: BCOL,
     CLOUD_TOP: CLOUD_TOP, CLOUD_BOTTOM: CLOUD_BOTTOM,
+    pickSlots: pickSlots,
+    facingOf: facingOf,
     mulberry32: mulberry32,
     makeSeed: makeSeed,
     makeCity: makeCity,
