@@ -1,13 +1,14 @@
 # AI_HANDOFF — Gorillas Online
 
-Son güncelleme: 2026-08-21
+Son güncelleme: 2026-08-25
 
 ## Durum
 
-Çalışıyor ve doğrulandı. `npm test` → 64/64 geçiyor. Tarayıcıda sınandı: oda
+Çalışıyor ve doğrulandı. `npm test` → 77/77 geçiyor. Tarayıcıda sınandı: oda
 kurma (şifreli), derin bağlantıyla katılma, sohbet, takım seçimi, 2'ye 2 ve
 4'e 4 maç, sıra devri, atış canlandırması, zemin tahribatı, canlı nişan
-yansıması, gündüz/gece teması, düşme canlandırması, kopma hâlinde hükmen sonuç.
+yansıması, gündüz/gece teması, düşme canlandırması, kopma hâlinde hükmen sonuç,
+İngilizce/Türkçe dil değişimi ve sistem mesajlarının anahtardan çözülmesi.
 
 Başlangıç noktası tek dosyalık `gorillas-1.html` idi; fizik ve çizim oradan
 korundu, ağ katmanı etrafına kuruldu.
@@ -47,7 +48,58 @@ Uygulama sırası dokümandaki sıradan farklı: takımlar (5) düşmeden (4) ö
 yapıldı, çünkü düşerek ölme "bu atışta kim öldü, raunt bitti mi" mantığına
 bağlanıyor ve takım modeli önce kurulmasa o mantık iki kez yazılacaktı.
 
+## Revize 2 (2026-08-25) — neler değişti
+
+Altı maddelik ikinci tur: yumuşatma temizliği, piksel font, yeni bulutlar,
+İngilizce dil desteği.
+
+**Keskinlik.** Canvas'ın `fillText` / `arc` / `stroke` yolları her boyutta
+kenar yumuşatması üretiyor; sahne 960 pikselden ekrana büyütüldüğü için o
+yarı saydam kenarlar bulanık bloklara dönüşüyordu. Çizim yolu değişti:
+`public/js/pixelfont.js` (5×7 bitmap font) ve `game.js` içindeki
+`pxDisc/pxLine/pxArc` yardımcıları. HTML tarafında bulanıklığın kaynağı olan
+üç efekt (üst bar parıltısı, iki `backdrop-filter`, modal ölçek animasyonu)
+kaldırıldı.
+
+**Bulutlar.** Referans görseldeki basamaklı biçime geçti; 4 piksellik hücre
+ızgarası, gölgeli taban. Yoğunluk rüzgâr şiddetiyle 3–7 arasında değişiyor,
+bulutlar rüzgâr yönünde tam piksel adımlarıyla kayıyor ve artık güneşin/ayın
+önünden geçiyorlar.
+
+**Diller.** `public/js/i18n.js` iki sözlük tutuyor. Varsayılan dil tarayıcının
+dil listesinden ve saat diliminden seçiliyor; üst bardaki düğmeyle elle
+değiştirilebiliyor, seçim `localStorage`'da kalıyor.
+
 ## Mimari kararlar (ve nedenleri)
+
+**Sahne yazıları piksel fontla, kendi elimizle çizilir.**
+`ctx.fillText` hiçbir boyutta keskin çıkmıyor — Press Start 2P dahil, 8'in
+katı boyutlarda bile ölçülen kenar pikseli oranı %40'ın altına inmiyor.
+`PixelFont` harfleri `fillRect` ile bastığı için her tam sayı ölçekte
+kusursuz. **`fillText`'e geri dönmeyin.** Tek istisna: piksel fontta
+karşılığı olmayan harf içeren takma adlar (Kiril, CJK, emoji);
+`PixelFont.supports()` bunu bildirir ve `drawName` eski yola düşer.
+
+**Çizimde arc/stroke yasak.** Yeni bir şekil eklerken `pxDisc/pxLine/pxArc`
+kullanın. Muz eğrisel olduğu için istisna: 16 dönme adımı bir kez çizilip
+`hardenAlpha` ile alfası eşiğe vuruluyor, sonra hazır bitmap basılıyor.
+Dönüşü `ctx.rotate` ile yapmak kareleri yarım piksele düşürürdü.
+
+**Sunucu metin değil ÇEVİRİ ANAHTARI yollar.**
+`sys(room, key, params)` ve `err(client, key, params, code)`. Aynı odadaki iki
+oyuncunun dili farklı olabildiği için metni sunucuda kurmak mümkün değil.
+Yeni bir anahtar eklerken `public/js/i18n.js` içine **hem tr hem en**
+karşılığını yazın; unutulursa kullanıcı ham anahtarı görür.
+`test/ui.test.js` bunu tarayıp kırılıyor.
+
+**Dil tespiti IP ile değil tarayıcıyla yapılır.** Dış servise istek yok,
+çevrimdışı çalışır, VPN arkasında da doğru sonuç verir ve yurt dışındaki
+Türk kullanıcıya Türkçe gelir. Sıra: kayıtlı tercih → `navigator.languages`
+içinde "tr" → saat dilimi `Europe/Istanbul` → İngilizce.
+
+**Dil seçeneği üst barda, oda ayarlarında değil.** Oda ayarları oda sahibine
+ait ve oda geneli; dil kişiye özel. Bu yüzden takma ad ve ses düğmeleriyle
+aynı kümede duruyor.
 
 **Sunucu otoriter, istemci yalnız oynatıcı.**
 Atış, çarpma, skor ve sıra `server/rooms.js` içinde çözülür. İstemci hiçbir
@@ -98,7 +150,11 @@ yapmaz, yalnızca listeyi canlandırır.
 
 **Bulutlar ayrı bir rastgelelik dizisi kullanır.** Şehir akışında rüzgâr kapalıysa
 bir çekim atlanıyor; aynı diziyi paylaşsalardı rüzgârsız odalarda istemciler
-farklı bulut görürdü. `makeClouds(seed ^ 0x9E3779B9)` bu bağı koparıyor.
+farklı bulut görürdü. `makeClouds(seed ^ 0x9E3779B9, wind)` bu bağı koparıyor.
+Bulut yoğunluğu rüzgâra bağlı olduğu için `createRound` rüzgârı bulutlardan
+önce çekiyor; ana dizinin sırası (şehir → goriller → rüzgâr) değişmedi.
+İstemci `setRound` içinde bulutları sunucunun bildirdiği rüzgârla yeniden
+kuruyor, yoksa rüzgârı kapalı odalarda yoğunluk yanlış çıkardı.
 
 ## Bilinen tuzaklar
 
@@ -132,7 +188,18 @@ farklı bulut görürdü. `makeClouds(seed ^ 0x9E3779B9)` bu bağı koparıyor.
 - **Bulut Y aralığı bilinçli dar.** Bulutlar muzdan sonra çizildiği için binaları
   ve gorilleri kapatmamaları gerekiyor; `CLOUD_BOTTOM` en yüksek gorilin
   tepesinin (y=107) üzerinde tutuluyor. Şehir yüksekliği değişirse bu sabiti de
-  gözden geçirin.
+  gözden geçirin. `CLOUD_TOP` ise güneşin üstüne çıkacak kadar yukarıda (16):
+  bulutlar artık güneşin önünden geçtiği için ondan kaçmıyorlar.
+- **`data-i18n` metni her dil değişiminde EZER.** Bir öğeye hem `data-i18n`
+  koyup hem JS'ten metin yazarsanız, `applyI18n` yazdığınızı siler. Dinamik
+  metinler (sıra yazısı, lobi kartları) `renderRoom`/`renderLobby` içinden
+  geçtiği için sorun çıkmıyor; yeni dinamik alanları da oradan besleyin.
+- **Sahnedeki bekleme yazısı anahtar olarak saklanır.** `setIdle(key)`
+  kullanın; `view.clear("düz metin")` çağırırsanız dil değişince yazı
+  eski dilde kalır.
+- **Piksel font önbelleği renge duyarlı.** `PixelFont.bitmap` anahtarında
+  metin, ölçek, renk ve kontur var; tema değişince doğru bitmap üretilir.
+  Önbellek 240 girdide en eskisini atar.
 
 ## Sıradaki adımlar (yapılmadı)
 
