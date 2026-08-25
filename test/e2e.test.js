@@ -7,6 +7,7 @@ const test = require("node:test");
 const assert = require("node:assert");
 const WebSocket = require("ws");
 const { server, hub, wss } = require("../server/index.js");
+const core = require("../shared/game-core.js");
 
 let base = "";
 
@@ -267,6 +268,8 @@ test("ayağı oyulan goril düşer ve bu atış mesajıyla bildirilir", async ()
     { x: 470, y: 150, w: 30, h: 250, color: "#A8A8A8", windows: [] }   // hedefin ince kulesi
   ];
   st.craters = [];
+  // zemin ızgarası binalardan türüyor; binaları değiştirince yeniden kurulmalı
+  core.rebuildGrid(st);
   st.gravity = 0;
   st.wind = 0;
   st.gorillas[0].x = 60;  st.gorillas[0].y = 168;   // namlu y = 160

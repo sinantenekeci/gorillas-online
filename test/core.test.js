@@ -120,6 +120,43 @@ test("krater açılan yer artık katı değildir, kenarı hâlâ katıdır", () 
   assert.strictEqual(core.solid(state, 300 + 26, 200), true);
 });
 
+/* ---------------- zemin ızgarası ----------------
+   Izgara artık zeminin tek doğruluk kaynağı. Sunucu ile istemcinin aynı
+   ızgaraya varması, oyunun "iki tarayıcı farklı sonuç görmesin" güvencesinin
+   temeli; aşağıdaki testler o güvenceyi koruyor. */
+test("aynı tohum iki tarafta aynı ızgarayı üretir", () => {
+  const a = core.createRound(31337, { red: 2, blue: 2 });
+  const b = core.createRound(31337, { red: 2, blue: 2 });
+  assert.deepStrictEqual(Array.from(a.grid), Array.from(b.grid));
+  assert.strictEqual(a.grid.length, core.GCOLS * core.GROWS);
+});
+
+/* Odaya sonradan giren, krater geçmişini baştan oynatarak ızgarayı kuruyor.
+   Sırayla işlemek ile toptan yeniden kurmak aynı sonucu vermezse, geç gelen
+   oyuncu başkalarının görmediği bir zemin görür. */
+test("kraterleri sırayla işlemek ile baştan kurmak aynı ızgarayı verir", () => {
+  const canli = core.createRound(4242, { red: 2, blue: 2 });
+  const kraterler = [
+    { x: 120, y: 300, r: 24 }, { x: 480, y: 240, r: 34 },
+    { x: 121, y: 301, r: 24 }, { x: 900, y: 380, r: 24 }
+  ];
+  kraterler.forEach((c) => core.applyCrater(canli, c));
+
+  const gecGelen = core.createRound(4242, { red: 2, blue: 2 });
+  kraterler.forEach((c) => core.applyCrater(gecGelen, c));
+  assert.deepStrictEqual(Array.from(gecGelen.grid), Array.from(canli.grid));
+
+  // aynı geçmişten toptan yeniden kurmak da aynı sonucu vermeli
+  const kopya = { buildings: canli.buildings, craters: canli.craters.slice() };
+  core.rebuildGrid(kopya);
+  assert.deepStrictEqual(Array.from(kopya.grid), Array.from(canli.grid));
+});
+
+test("ızgara çözünürlüğü sahneyi tam kaplar", () => {
+  assert.strictEqual(core.GCOLS * core.CELL, core.W);
+  assert.strictEqual(core.GROWS * core.CELL, core.H);
+});
+
 test("aynı krater aynı yerde iki kez açılınca sonuç değişmez (idempotent)", () => {
   const state = {
     buildings: [{ x: 0, y: 0, w: 640, h: 400, color: "#A80000", windows: [] }],

@@ -244,7 +244,8 @@
   /* Odaya sonradan girenin araya kaynaması için: krater ve ölü durumlarını uygular. */
   GameView.prototype.applySnapshot = function (m) {
     if (!this.state) return;
-    (m.craters || []).forEach((c) => this.state.craters.push(c));
+    // krater hem gecmise hem izgaraya islenir; dogrudan push edilirse zemin bayatlar
+    (m.craters || []).forEach((c) => core.applyCrater(this.state, c));
     (m.gy || []).forEach((y, i) => { if (this.state.gorillas[i]) this.state.gorillas[i].y = y; });
     (m.dead || []).forEach((d, i) => { if (d && this.state.gorillas[i]) this.state.gorillas[i].dead = true; });
     this.state.sunHit = !!m.sunHit;
@@ -587,7 +588,7 @@
       if (b.r >= b.max) {
         b.r = b.max; b.phase = 1;
         this.punchCrater({ x: b.x, y: b.y, r: b.max });
-        this.state.craters.push({ x: b.x, y: b.y, r: b.max });
+        core.applyCrater(this.state, { x: b.x, y: b.y, r: b.max });
         if (b.victim >= 0 && this.state.gorillas[b.victim]) this.state.gorillas[b.victim].dead = true;
       }
     } else {

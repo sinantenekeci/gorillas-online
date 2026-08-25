@@ -190,6 +190,7 @@
       buildings: buildings,
       gorillas: gorillas,
       craters: [],
+      grid: buildGrid(buildings),
       clouds: makeClouds(seed, wind),
       wind: wind,
       gravity: typeof opts.gravity === "number" ? opts.gravity : 9.8,
@@ -197,21 +198,76 @@
     };
   }
 
-  /* ---------- zemin ---------- */
+  /* ---------- zemin: hücre ızgarası ----------
+     Zemin artık "dikdörtgenler eksi daireler" formülüyle değil, hücre
+     ızgarasıyla temsil ediliyor. Neden: eski model "şu parça 40 piksel aşağı
+     kaydı" cümlesini kuramıyordu; kraterle ikiye ayrılan binanın üst parçası
+     havada asılı kalıyordu. Izgarada kopma tespiti taşma-doldurma, düşme ise
+     hücre kaydırmak demek.
+
+     Kural tek: BİR HÜCRE, MERKEZ PİKSELİ ŞEKLİN İÇİNDEYSE DOLUDUR. Hem bina
+     hem krater aynı kuralı kullandığı için iki taraf da aynı ızgaraya varır.
+     Çözünürlük 2 piksel; krater kenarındaki sapma en fazla 1 piksel. */
+  var CELL = 2;
+  var GCOLS = W / CELL, GROWS = H / CELL;
+
+  function cellCenter(c) { return c * CELL + (CELL >> 1); }
+
+  function buildGrid(buildings) {
+    var g = new Uint8Array(GCOLS * GROWS), i, b, cx, cy, cx0, cx1, cy0, cy1;
+    for (i = 0; i < buildings.length; i++) {
+      b = buildings[i];
+      cx0 = Math.max(0, Math.ceil((b.x - (CELL >> 1)) / CELL));
+      cx1 = Math.min(GCOLS - 1, Math.floor((b.x + b.w - 1 - (CELL >> 1)) / CELL));
+      cy0 = Math.max(0, Math.ceil((b.y - (CELL >> 1)) / CELL));
+      cy1 = Math.min(GROWS - 1, Math.floor((b.y + b.h - 1 - (CELL >> 1)) / CELL));
+      for (cy = cy0; cy <= cy1; cy++) {
+        for (cx = cx0; cx <= cx1; cx++) g[cy * GCOLS + cx] = 1;
+      }
+    }
+    return g;
+  }
+
+  function punchGrid(grid, x, y, r) {
+    var cx0 = Math.max(0, Math.floor((x - r) / CELL));
+    var cx1 = Math.min(GCOLS - 1, Math.floor((x + r) / CELL));
+    var cy0 = Math.max(0, Math.floor((y - r) / CELL));
+    var cy1 = Math.min(GROWS - 1, Math.floor((y + r) / CELL));
+    var rr = r * r, cx, cy, dx, dy;
+    for (cy = cy0; cy <= cy1; cy++) {
+      dy = cellCenter(cy) - y;
+      for (cx = cx0; cx <= cx1; cx++) {
+        dx = cellCenter(cx) - x;
+        if (dx * dx + dy * dy <= rr) grid[cy * GCOLS + cx] = 0;
+      }
+    }
+  }
+
+  /* Elle kurulan sahnelerde (testler) ızgara olmayabilir; ilk kullanımda
+     binalardan ve o ana kadarki kraterlerden yeniden üretilir. */
+  function gridOf(state) {
+    if (!state.grid) rebuildGrid(state);
+    return state.grid;
+  }
+
+  function rebuildGrid(state) {
+    state.grid = buildGrid(state.buildings || []);
+    var cr = state.craters || [];
+    for (var i = 0; i < cr.length; i++) punchGrid(state.grid, cr[i].x, cr[i].y, cr[i].r);
+    return state.grid;
+  }
+
+  /* Krateri hem geçmişe hem ızgaraya işler. Doğrudan `state.craters.push`
+     YAPMAYIN — ızgara bayatlar ve zemin sunucuda başka, istemcide başka olur. */
+  function applyCrater(state, cr) {
+    state.craters.push(cr);
+    punchGrid(gridOf(state), cr.x, cr.y, cr.r);
+  }
+
   function solid(state, x, y) {
     if (x < 0 || x >= W || y < 0 || y >= H) return false;
-    var inB = false, i, b, c, dx, dy;
-    for (i = 0; i < state.buildings.length; i++) {
-      b = state.buildings[i];
-      if (x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h) { inB = true; break; }
-    }
-    if (!inB) return false;
-    for (i = 0; i < state.craters.length; i++) {
-      c = state.craters[i];
-      dx = x - c.x; dy = y - c.y;
-      if (dx * dx + dy * dy <= c.r * c.r) return false;
-    }
-    return true;
+    var cx = Math.floor(x / CELL), cy = Math.floor(y / CELL);
+    return gridOf(state)[cy * GCOLS + cx] !== 0;
   }
 
   function hitsGorilla(state, x, y, i) {
@@ -331,7 +387,7 @@
 
   /* Carpmanin zemine ve gorillere etkisini uygular (iki tarafta da ayni). */
   function applyImpact(state, impact) {
-    if (impact.type !== "out") state.craters.push({ x: impact.x, y: impact.y, r: impact.r });
+    if (impact.type !== "out") applyCrater(state, { x: impact.x, y: impact.y, r: impact.r });
     if (impact.victim >= 0) state.gorillas[impact.victim].dead = true;
   }
 
@@ -343,6 +399,8 @@
 
   return {
     W: W, H: H, GW: GW, GH: GH, SUN: SUN, DT: DT, SUB: SUB, BCOL: BCOL,
+    CELL: CELL, GCOLS: GCOLS, GROWS: GROWS,
+    buildGrid: buildGrid, rebuildGrid: rebuildGrid, applyCrater: applyCrater,
     CLOUD_TOP: CLOUD_TOP, CLOUD_BOTTOM: CLOUD_BOTTOM, CLOUD_CELL: CLOUD_CELL,
     SUPPORT_MIN: SUPPORT_MIN, FATAL_FALL: FATAL_FALL, FALL_STEP: FALL_STEP,
     supportRatio: supportRatio,
