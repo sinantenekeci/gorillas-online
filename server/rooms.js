@@ -162,11 +162,11 @@ class Hub {
 
   /* ---------- oda ---------- */
   createRoom(client, msg) {
-    if (client.roomId) { this.err(client, "Zaten bir odadasın."); return null; }
-    if (this.rooms.size >= MAX_ROOMS) { this.err(client, "Sunucu dolu, biraz sonra dene."); return null; }
+    if (client.roomId) { this.err(client, "err.inRoom"); return null; }
+    if (this.rooms.size >= MAX_ROOMS) { this.err(client, "err.serverFull"); return null; }
     const room = {
       id: makeRoomId(),
-      name: clean(msg.name, MAX_ROOM_NAME) || (client.name + " odası"),
+      name: clean(msg.name, MAX_ROOM_NAME) || client.name,
       passHash: hashPass(clean(msg.password, 64)),
       hostId: client.id,
       members: [],
@@ -182,12 +182,12 @@ class Hub {
   }
 
   joinById(client, msg) {
-    if (client.roomId) return this.err(client, "Zaten bir odadasın.");
+    if (client.roomId) return this.err(client, "err.inRoom");
     const room = this.rooms.get(clean(msg.roomId, 8).toUpperCase());
-    if (!room) return this.err(client, "Oda bulunamadı.", "gone");
-    if (room.members.length >= room.settings.maxPlayers) return this.err(client, "Oda dolu.", "full");
+    if (!room) return this.err(client, "err.roomGone", null, "gone");
+    if (room.members.length >= room.settings.maxPlayers) return this.err(client, "err.roomFull", null, "full");
     if (room.passHash && hashPass(clean(msg.password, 64)) !== room.passHash) {
-      return this.err(client, "Şifre yanlış.", "badpass");
+      return this.err(client, "err.badPass", null, "badpass");
     }
     this.joinRoom(client, room, false);
   }
@@ -216,7 +216,7 @@ class Hub {
     }
 
     this.send(client, { t: "joined", roomId: room.id, name: client.name });
-    this.sys(room, client.name + " odaya katıldı.");
+    this.sys(room, "sys.joined", { name: client.name });
     this.pushRoomState(room);
     this.broadcastRoomList();
   }
@@ -235,8 +235,8 @@ class Hub {
       this.stopTimer(room);
       this.rooms.delete(room.id);
     } else {
-      this.sys(room, client.name + " odadan ayrıldı.");
-      if (room.match && wasTeam) this.dropFromMatch(room, client.id, client.name + " oyundan ayrıldı.");
+      this.sys(room, "sys.left", { name: client.name });
+      if (room.match && wasTeam) this.dropFromMatch(room, client.id, "sys.leftMatch", { name: client.name });
       this.pushRoomState(room);
     }
     if (!silent) {
@@ -254,10 +254,10 @@ class Hub {
   setTeam(client, msg) {
     const room = this.rooms.get(client.roomId);
     if (!room) return;
-    if (room.match) return this.err(client, "Maç sürüyor, bitmesini bekle.");
+    if (room.match) return this.err(client, "err.matchRunning");
     const want = msg.team === "red" || msg.team === "blue" ? msg.team : null;
     if (want && this.teamOf(room, want).length >= TEAM_MAX && client.team !== want) {
-      return this.err(client, "Takım dolu (en fazla " + TEAM_MAX + " kişi).");
+      return this.err(client, "err.teamFull", { max: TEAM_MAX });
     }
     if (client.team === want) return;
     client.team = want;
@@ -269,10 +269,10 @@ class Hub {
   startMatch(client) {
     const room = this.rooms.get(client.roomId);
     if (!room) return;
-    if (room.hostId !== client.id) return this.err(client, "Maçı yalnızca oda sahibi başlatabilir.");
+    if (room.hostId !== client.id) return this.err(client, "err.hostOnlyStart");
     if (room.match || room.starting) return;
     const red = this.teamOf(room, "red"), blue = this.teamOf(room, "blue");
-    if (!red.length || !blue.length) return this.err(client, "Her iki takımda da en az bir oyuncu olmalı.");
+    if (!red.length || !blue.length) return this.err(client, "err.needBothTeams");
 
     room.starting = true;
     this.broadcast(room, { t: "countdown", seconds: 3 });
@@ -298,8 +298,10 @@ class Hub {
       phase: "aim",
       turnEndsAt: 0
     };
-    this.sys(room, "Maç başladı: Kırmızı " + this.teamOf(room, "red").length +
-      " - " + this.teamOf(room, "blue").length + " Mavi");
+    this.sys(room, "sys.matchStart", {
+      red: this.teamOf(room, "red").length,
+      blue: this.teamOf(room, "blue").length
+    });
     this.broadcastRoomList();
     this.startRound(room);
     this.pushRoomState(room);
@@ -388,7 +390,7 @@ class Hub {
     room.timer = this.setTimeout(() => {
       if (!room.match || room.match.phase !== "aim") return;
       const p = this.playerByGorilla(room, room.match.turn);
-      this.sys(room, (p ? p.name : "Oyuncu") + " süreyi kaçırdı, sıra geçti.");
+      this.sys(room, "sys.timeout", { name: p ? p.name : "?" });
       this.nextTurn(room);
     }, this.wait(room.settings.turnSeconds * 1000));
   }
@@ -435,14 +437,12 @@ class Hub {
     if (!room.match) return;
     if (shot.impact.victim >= 0) {
       const victim = this.playerByGorilla(room, shot.impact.victim);
-      if (victim) this.sys(room, victim.name + " vuruldu.");
+      if (victim) this.sys(room, "sys.hit", { name: victim.name });
     }
     (falls || []).forEach((f) => {
       const p = this.playerByGorilla(room, f.i);
       if (!p) return;
-      this.sys(room, f.died
-        ? p.name + " ayagi oyulunca dustu ve kurtulamadi."
-        : p.name + " dustu ama ayaga kalkti.");
+      this.sys(room, f.died ? "sys.fellDead" : "sys.fellSurvived", { name: p.name });
     });
     if (this.checkRoundOver(room)) return;
     this.nextTurn(room);
@@ -462,10 +462,8 @@ class Hub {
     m.phase = "roundover";
     if (winner) m.scores[winner]++;
     this.broadcast(room, { t: "roundEnd", winner: winner, scores: m.scores });
-    this.sys(room, winner
-      ? (winner === "red" ? "Kırmızı" : "Mavi") + " raundu aldı (" +
-        m.scores.red + "-" + m.scores.blue + ")."
-      : "Raunt berabere bitti.");
+    if (winner) this.sys(room, "sys.roundWin", { team: winner, red: m.scores.red, blue: m.scores.blue });
+    else this.sys(room, "sys.roundDraw");
 
     this.stopTimer(room);
     room.timer = this.setTimeout(() => {
@@ -477,7 +475,7 @@ class Hub {
   }
 
   /* Oyuncu maç ortasında koptuğunda gorili ölür; takımı tükendiyse raunt biter. */
-  dropFromMatch(room, id, reason) {
+  dropFromMatch(room, id, reasonKey, reasonParams) {
     const m = room.match;
     if (!m) return;
     const p = m.players.find((x) => x.id === id);
@@ -485,7 +483,7 @@ class Hub {
     const g = m.state.gorillas[p.gorilla];
     if (g && !g.dead) {
       g.dead = true;
-      this.sys(room, reason);
+      this.sys(room, reasonKey, reasonParams);
     }
     if (m.phase === "resolving") return;      // atış çözülünce zaten bakılacak
     if (this.checkRoundOver(room)) return;
@@ -501,9 +499,8 @@ class Hub {
       : (m.scores.red > m.scores.blue ? "red" : "blue");
     room.match = null;
     this.broadcast(room, { t: "matchEnd", winner: winner, scores: m.scores });
-    this.sys(room, winner
-      ? (winner === "red" ? "Kırmızı" : "Mavi") + " takım maçı kazandı."
-      : "Maç berabere bitti.");
+    if (winner) this.sys(room, "sys.matchWin", { team: winner });
+    else this.sys(room, "sys.matchDraw");
     this.pushRoomState(room);
     this.broadcastRoomList();
   }
@@ -515,12 +512,17 @@ class Hub {
     for (const m of room.members) this.send(m, msg);
   }
 
-  sys(room, text) {
-    this.broadcast(room, { t: "chat", system: true, text: text, ts: this.now() });
+  /* Sistem mesajları ve hatalar hazır metin değil ÇEVİRİ ANAHTARI taşır.
+     Aynı odadaki iki oyuncunun dili farklı olabildiği için metni sunucuda
+     kurmak mümkün değil; istemci anahtarı kendi sözlüğünden çözer.
+     Anahtar eklerken public/js/i18n.js içine hem tr hem en karşılığını
+     yazın, yoksa kullanıcı ham anahtarı görür. */
+  sys(room, key, params) {
+    this.broadcast(room, { t: "chat", system: true, key: key, params: params || null, ts: this.now() });
   }
 
-  err(client, text, code) {
-    this.send(client, { t: "err", text: text, code: code || "err" });
+  err(client, key, params, code) {
+    this.send(client, { t: "err", key: key, params: params || null, code: code || "err" });
   }
 
   stopTimer(room) {
@@ -570,7 +572,7 @@ class Hub {
     if (!text) return;
     const now = this.now();
     client.chatStamps = client.chatStamps.filter((s) => now - s < CHAT_WINDOW_MS);
-    if (client.chatStamps.length >= CHAT_BURST) return this.err(client, "Çok hızlı yazıyorsun.");
+    if (client.chatStamps.length >= CHAT_BURST) return this.err(client, "err.chatFlood");
     client.chatStamps.push(now);
     this.broadcast(room, {
       t: "chat", from: client.id, name: client.name,
@@ -604,7 +606,7 @@ class Hub {
     client.name = room ? this.uniqueName(room, name) : name;
     this.send(client, { t: "welcome", id: client.id, name: client.name });
     if (room) {
-      this.sys(room, old + " artık " + client.name);
+      this.sys(room, "sys.renamed", { old: old, name: client.name });
       this.pushRoomState(room);
     }
   }
@@ -612,10 +614,10 @@ class Hub {
   settings(client, msg) {
     const room = this.rooms.get(client.roomId);
     if (!room) return;
-    if (room.hostId !== client.id) return this.err(client, "Bunu sadece oda sahibi yapabilir.");
-    if (room.match) return this.err(client, "Maç sırasında ayar değiştirilemez.");
+    if (room.hostId !== client.id) return this.err(client, "err.hostOnly");
+    if (room.match) return this.err(client, "err.settingsLocked");
     room.settings = normalizeSettings(Object.assign({}, room.settings, msg.settings));
-    this.sys(room, "Oda ayarları güncellendi.");
+    this.sys(room, "sys.settings");
     this.pushRoomState(room);
     this.broadcastRoomList();
   }
@@ -623,11 +625,11 @@ class Hub {
   kick(client, msg) {
     const room = this.rooms.get(client.roomId);
     if (!room) return;
-    if (room.hostId !== client.id) return this.err(client, "Bunu sadece oda sahibi yapabilir.");
+    if (room.hostId !== client.id) return this.err(client, "err.hostOnly");
     const target = this.clients.get(String(msg.id));
     if (!target || target.roomId !== room.id || target.id === client.id) return;
-    this.sys(room, target.name + " oda sahibi tarafından atıldı.");
-    this.send(target, { t: "err", text: "Odadan atıldın.", code: "kicked" });
+    this.sys(room, "sys.kicked", { name: target.name });
+    this.err(target, "err.kicked", null, "kicked");
     this.leaveRoom(target, false);
   }
 

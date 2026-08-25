@@ -104,7 +104,7 @@ wss.on("connection", (ws, req) => {
   const ip = ipOf(req);
   const used = perIp.get(ip) || 0;
   if (used >= MAX_CONN_PER_IP) {
-    ws.send(JSON.stringify({ t: "err", text: "Bu adresten çok fazla bağlantı var.", code: "ratelimit" }));
+    ws.send(JSON.stringify({ t: "err", key: "err.tooManyConns", code: "ratelimit" }));
     return ws.close(1008, "too many connections");
   }
   perIp.set(ip, used + 1);

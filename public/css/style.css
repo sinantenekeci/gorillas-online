@@ -61,6 +61,21 @@ body {
   -webkit-font-smoothing: none;
 }
 
+/* Piksel fontların etrafındaki bulanıklık kasıtlı efektlerden geliyordu:
+   text-shadow parıltısı, backdrop-filter bulanıklığı ve ölçek animasyonları.
+   Üçü de kaldırıldı — GERİ EKLEMEYİN, harflerin kenarına gri hâle getirir.
+   Sahne içi yazılar zaten canvas'ta piksel fontla çiziliyor. */
+
+/* Canvas'a çizilmiş piksel yazı: 1:1 basılır, ölçeklenirse bile bloklar
+   keskin kalsın diye nearest-neighbour. Yanındaki metin yedektir. */
+.pixline { display: flex; align-items: center; justify-content: center; }
+.pixline__art { image-rendering: pixelated; max-width: 100%; height: auto; }
+.pixline__art[hidden] { display: none; }
+.pixline.is-pixel .pixline__txt {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
 h1, h2, h3, .h-section, .btn, .field__label, kbd {
   font-family: var(--font-display);
   font-weight: 400;
@@ -102,15 +117,13 @@ a { color: var(--secondary-lt); }
   display: flex; flex-wrap: wrap; gap: var(--s3);
   align-items: center; justify-content: space-between;
   padding: var(--s3) var(--s4);
-  background: linear-gradient(180deg, rgba(8,13,26,.96), rgba(8,13,26,.86));
+  background: linear-gradient(180deg, rgba(8,13,26,.98), rgba(8,13,26,.92));
   border-bottom: 3px solid var(--border-strong);
-  backdrop-filter: blur(6px);
 }
 .topbar__brand { display: flex; align-items: center; gap: var(--s3); }
 .topbar__brand h1 { align-self: center; }
 .topbar h1 {
   margin: 0; font-size: 15px; color: var(--warn); line-height: 1.3;
-  text-shadow: 0 0 14px rgba(252,252,84,.3);
 }
 .topbar h1 span { display: block; font-size: 9px; color: var(--ega-cyan); letter-spacing: .3em; margin-top: 5px; }
 .topbar__right { display: flex; align-items: center; gap: var(--s2); }
@@ -318,7 +331,7 @@ main { max-width: 1440px; margin: 0 auto; padding: var(--s5) var(--s4) var(--s7)
   position: absolute; inset: 0; z-index: var(--z-overlay);
   display: flex; flex-direction: column; justify-content: center; align-items: center; gap: var(--s2);
   padding: var(--s4); text-align: center; line-height: 1.5;
-  background: rgba(8,13,26,.82); backdrop-filter: blur(3px);
+  background: rgba(8,13,26,.9);
 }
 .overlay[hidden] { display: none; }
 .overlay h3 { margin: 0; font-size: clamp(13px, 3vw, 20px); color: var(--warn); }
@@ -418,7 +431,7 @@ main { max-width: 1440px; margin: 0 auto; padding: var(--s5) var(--s4) var(--s7)
   box-shadow: 10px 10px 0 rgba(0,0,0,.6);
   animation: pop var(--dur) var(--ease-out);
 }
-@keyframes pop { from { transform: scale(.96); opacity: 0 } to { transform: scale(1); opacity: 1 } }
+@keyframes pop { from { opacity: 0 } to { opacity: 1 } }
 .modal__head {
   display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
   padding: var(--s3) var(--s4); border-bottom: 3px solid var(--border-strong); background: var(--bg-deep);

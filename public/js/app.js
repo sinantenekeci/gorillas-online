@@ -7,6 +7,7 @@
   const el = {
     netStatus: $("netStatus"), netText: $("netText"),
     nickBtn: $("nickBtn"), nickLabel: $("nickLabel"), soundBtn: $("soundBtn"),
+    langBtn: $("langBtn"), langLabel: $("langLabel"),
     viewLobby: $("viewLobby"), viewRoom: $("viewRoom"),
     roomList: $("roomList"), roomsEmpty: $("roomsEmpty"), lobbyCount: $("lobbyCount"),
     roomSearch: $("roomSearch"), refreshBtn: $("refreshBtn"), createBtn: $("createBtn"),
@@ -14,7 +15,9 @@
     leaveBtn: $("leaveBtn"), settingsBtn: $("settingsBtn"),
     redVal: $("redVal"), blueVal: $("blueVal"),
     roundLabel: $("roundLabel"), windLabel: $("windLabel"),
-    overlay: $("overlay"), overlayTitle: $("overlayTitle"), overlayText: $("overlayText"),
+    overlay: $("overlay"),
+    overlayTitle: $("overlayTitle"), overlayTitleCv: $("overlayTitleCv"), overlayTitleTxt: $("overlayTitleTxt"),
+    overlayText: $("overlayText"), overlayTextCv: $("overlayTextCv"), overlayTextTxt: $("overlayTextTxt"),
     turnText: $("turnText"), timerWrap: $("timerWrap"), timerFill: $("timerFill"), timerNum: $("timerNum"),
     ang: $("ang"), vel: $("vel"), angV: $("angV"), velV: $("velV"), fireBtn: $("fireBtn"),
     seatHint: $("seatHint"),
@@ -46,13 +49,56 @@
   let timer = { end: 0, total: 30, raf: 0 };
   let soundOn = store.get("gor.sound", "1") === "1";
 
-  const TEAM_TR = { red: "Kırmızı", blue: "Mavi" };
+  const t = (key, params) => I18N.t(key, params);
+  const teamName = (team) => t(team === "red" ? "team.redName" : "team.blueName");
 
   /* ---------- yardımcılar ---------- */
   function esc(s) {
     return String(s).replace(/[&<>"']/g, (c) =>
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
+
+  /* ---------- dil ----------
+     Sabit metinler HTML'de data-i18n ile işaretli; dil değişince hepsi
+     yeniden yazılır. Değişken metinler (lobi kartları, sıra yazısı, sahne)
+     render fonksiyonlarından geçtiği için burada yeniden çağrılıyor. */
+  function applyI18n() {
+    const lang = I18N.get();
+    document.documentElement.lang = lang;
+    document.title = t("page.title");
+    const desc = document.querySelector('meta[name="description"]');
+    if (desc) desc.setAttribute("content", t("page.desc"));
+
+    document.querySelectorAll("[data-i18n]").forEach((n) => {
+      n.textContent = t(n.getAttribute("data-i18n")) + (n.getAttribute("data-i18n-suffix") || "");
+    });
+    document.querySelectorAll("[data-i18n-ph]").forEach((n) => {
+      n.setAttribute("placeholder", t(n.getAttribute("data-i18n-ph")));
+    });
+    document.querySelectorAll("[data-i18n-aria]").forEach((n) => {
+      n.setAttribute("aria-label", t(n.getAttribute("data-i18n-aria")));
+    });
+
+    el.langLabel.textContent = lang.toUpperCase();
+    view.teamLabel = { red: t("team.red"), blue: t("team.blue") };
+    applySound();
+    if (!view.state) view.idleText = t(idleKey);
+    renderLobby();
+    if (room) renderRoom();
+    redrawOverlay();
+  }
+
+  /* Sahnedeki bekleme yazısı dil değişiminde de doğru kalsın diye metni
+     değil anahtarı saklıyoruz. */
+  let idleKey = "scene.waitingPlayers";
+  function setIdle(key) { idleKey = key; view.clear(t(key)); }
+
+  el.langBtn.addEventListener("click", () => {
+    const langs = I18N.langs;
+    const next = langs[(langs.indexOf(I18N.get()) + 1) % langs.length];
+    I18N.set(next);
+  });
+  I18N.onChange(applyI18n);
 
   let toastTimer = 0;
   function toast(text, bad) {
@@ -99,9 +145,11 @@
   /* ---------- bağlantı durumu ---------- */
   net.on("state", (s) => {
     el.netStatus.className = "status status--" + (s === "ok" ? "ok" : s === "bad" ? "bad" : "wait");
-    el.netText.textContent = s === "ok" ? "bağlı" : s === "bad" ? "kopuk" : "bağlanıyor";
+    const key = s === "ok" ? "net.ok" : s === "bad" ? "net.bad" : "net.connecting";
+    el.netText.setAttribute("data-i18n", key);
+    el.netText.textContent = t(key);
     if (s === "bad") {
-      el.turnText.textContent = "Bağlantı koptu, yeniden deneniyor…";
+      el.turnText.textContent = t("net.lost");
       setControls(false);
     }
   });
@@ -144,11 +192,11 @@
     if (m.code === "badpass" && pendingJoin) {
       if (el.formJoin.hidden) {
         $("jnPass").value = "";
-        $("joinLead").textContent = "Bu oda şifreli.";
-        openModal(el.formJoin, "ŞİFRE GEREKLİ");
+        $("joinLead").textContent = t("modal.locked");
+        openModal(el.formJoin, t("modal.passNeeded"));
       }
       const err = $("jnErr");
-      err.textContent = $("jnPass").value ? m.text : "Girmek için şifre gerekiyor.";
+      err.textContent = $("jnPass").value ? t(m.key, m.params) : t("modal.passMissing");
       err.hidden = false;
       $("jnPass").focus();
       $("jnPass").select();
@@ -161,12 +209,12 @@
       setHash("");
       closeModal();
       if (!room) {
-        view.clear();
+        setIdle("scene.waitingPlayers");
         switchView(false);
         net.send({ t: "rooms" });
       }
     }
-    toast(m.text, true);
+    toast(t(m.key, m.params), true);
   });
 
   /* ---------- lobi ---------- */
@@ -181,45 +229,45 @@
 
     const people = rooms.reduce((a, r) => a + r.count, 0);
     el.lobbyCount.textContent = rooms.length
-      ? rooms.length + " oda · " + people + " kişi çevrimiçi"
-      : "Henüz oda yok.";
+      ? t("lobby.count", { rooms: rooms.length, people: people })
+      : t("lobby.none");
 
     el.roomList.innerHTML = list.map(cardHtml).join("");
     show(el.roomsEmpty, list.length === 0);
     if (list.length === 0 && q) {
-      el.roomsEmpty.querySelector("h3").textContent = "Eşleşme yok";
-      el.roomsEmpty.querySelector("p").textContent = "\"" + q + "\" için oda bulunamadı.";
+      el.roomsEmpty.querySelector("h3").textContent = t("lobby.noMatchTitle");
+      el.roomsEmpty.querySelector("p").textContent = t("lobby.noMatchText", { q: q });
     } else if (list.length === 0) {
-      el.roomsEmpty.querySelector("h3").textContent = "Ortalık sakin";
-      el.roomsEmpty.querySelector("p").textContent =
-        "Henüz açık oda yok. İlk odayı sen kur, linki arkadaşlarına at.";
+      el.roomsEmpty.querySelector("h3").textContent = t("lobby.emptyTitle");
+      el.roomsEmpty.querySelector("p").textContent = t("lobby.emptyText");
     }
   }
 
   function cardHtml(r) {
     const full = r.count >= r.max;
-    const gravName = r.gravity === 1.6 ? "Ay" : r.gravity === 24.8 ? "Jüpiter" : "Dünya";
+    const grav = r.gravity === 1.6 ? "grav.moon" : r.gravity === 24.8 ? "grav.jupiter" : "grav.earth";
     return '<li class="room-card">' +
       '<div class="room-card__top">' +
         '<div><h3 class="room-card__name">' + esc(r.name) + "</h3>" +
         '<span class="room-card__code">' + r.id + "</span></div>" +
         (r.hasPassword
-          ? '<span class="tag tag--lock"><svg class="ic" aria-hidden="true"><use href="#i-lock"/></svg>ŞİFRELİ</span>'
+          ? '<span class="tag tag--lock"><svg class="ic" aria-hidden="true"><use href="#i-lock"/></svg>' +
+            esc(t("card.locked")) + "</span>"
           : "") +
       "</div>" +
       '<div class="room-card__meta">' +
         '<span><svg class="ic" aria-hidden="true"><use href="#i-users"/></svg>' + r.count + "/" + r.max + "</span>" +
         "<span>" + r.red + "v" + r.blue + "</span>" +
-        "<span>" + r.rounds + " raunt</span>" +
-        "<span>" + gravName + "</span>" +
-        "<span>" + (r.theme === "night" ? "gece" : "gündüz") + "</span>" +
+        "<span>" + esc(t("card.rounds", { n: r.rounds })) + "</span>" +
+        "<span>" + esc(t(grav)) + "</span>" +
+        "<span>" + esc(t(r.theme === "night" ? "theme.night" : "theme.day")) + "</span>" +
       "</div>" +
       '<div class="room-card__foot">' +
-        (r.playing ? '<span class="tag tag--live">MAÇ SÜRÜYOR</span>'
-                   : '<span class="tag">SAHA BOŞ</span>') +
-        (full ? '<span class="tag tag--full">DOLU</span>'
+        (r.playing ? '<span class="tag tag--live">' + esc(t("card.live")) + "</span>"
+                   : '<span class="tag">' + esc(t("card.idle")) + "</span>") +
+        (full ? '<span class="tag tag--full">' + esc(t("card.full")) + "</span>"
               : '<button class="btn btn--primary btn--sm" type="button" data-join="' + r.id +
-                '" data-lock="' + (r.hasPassword ? 1 : 0) + '">GİR</button>') +
+                '" data-lock="' + (r.hasPassword ? 1 : 0) + '">' + esc(t("card.join")) + "</button>") +
       "</div></li>";
   }
 
@@ -235,8 +283,8 @@
   });
 
   function openCreate() {
-    $("crName").value = (me.name || "Goril") + " odası";
-    openModal(el.formCreate, "ODA KUR");
+    $("crName").value = t("modal.roomOf", { name: me.name || t("modal.nickPh") });
+    openModal(el.formCreate, t("modal.create"));
   }
 
   function tryJoin(roomId, locked) {
@@ -246,8 +294,10 @@
     if (needsPass) {
       $("jnErr").hidden = true;
       $("jnPass").value = "";
-      $("joinLead").textContent = (known ? "“" + known.name + "” odası şifreli." : "Bu oda şifreli.");
-      openModal(el.formJoin, "ŞİFRE GEREKLİ");
+      $("joinLead").textContent = known
+        ? t("modal.lockedNamed", { name: known.name })
+        : t("modal.locked");
+      openModal(el.formJoin, t("modal.passNeeded"));
     } else {
       net.send({ t: "join", roomId: roomId });
     }
@@ -309,7 +359,7 @@
 
   el.nickBtn.addEventListener("click", () => {
     $("nkName").value = me.name || "";
-    openModal(el.formNick, "TAKMA AD");
+    openModal(el.formNick, t("modal.nick"));
   });
 
   $("crTurn").addEventListener("input", function () { $("crTurnV").textContent = this.value; });
@@ -324,7 +374,7 @@
     $("stTurn").value = room.settings.turnSeconds;
     $("stTurnV").textContent = room.settings.turnSeconds;
     $("stTheme").value = room.settings.theme || "day";
-    openModal(el.formSettings, "ODA AYARLARI");
+    openModal(el.formSettings, t("modal.roomSettings"));
   });
 
   /* ---------- oda ---------- */
@@ -334,7 +384,7 @@
     lastJoin = { roomId: m.roomId, password: lastPassword };
     setHash(m.roomId);
     el.chatLog.innerHTML = "";
-    view.clear("MAÇ BEKLENİYOR");
+    setIdle("scene.waitingMatch");
     switchView(true);
   });
 
@@ -342,7 +392,7 @@
     room = null; myTeam = null; myGorilla = -1; phase = "idle";
     lastJoin = null; lastPassword = "";
     setHash("");
-    view.clear();
+    setIdle("scene.waitingPlayers");
     switchView(false);
     net.send({ t: "rooms" });
   });
@@ -364,7 +414,7 @@
       view.applySnapshot(m.match);
       phase = m.match.phase;
     } else if (!m.match && view.state && phase !== "matchover") {
-      view.clear("MAÇ BEKLENİYOR");
+      setIdle("scene.waitingMatch");
     }
     renderRoom();
   });
@@ -390,11 +440,11 @@
     el.redVal.textContent = sc.red;
     el.blueVal.textContent = sc.blue;
     el.roundLabel.textContent = room.match
-      ? "RAUNT " + room.match.round + "/" + room.match.totalRounds
-      : room.settings.rounds + " RAUNTLUK MAÇ";
+      ? t("room.round", { n: room.match.round, total: room.match.totalRounds })
+      : t("room.roundsMatch", { n: room.settings.rounds });
     el.windLabel.textContent = room.match
       ? windText(room.match.wind)
-      : (room.settings.windOn ? "rüzgâr açık" : "rüzgâr kapalı");
+      : t(room.settings.windOn ? "wind.on" : "wind.off");
 
     const turnTeam = turnTeamOf();
     document.querySelector(".score--red").classList.toggle("is-turn", turnTeam === "red");
@@ -410,7 +460,7 @@
     el.redList.innerHTML = rosterHtml(red, "red");
     el.blueList.innerHTML = rosterHtml(blue, "blue");
     el.specList.innerHTML = spec.length ? rosterHtml(spec, null)
-      : '<li class="roster--empty">İzleyici yok.</li>';
+      : '<li class="roster--empty">' + esc(t("roster.noSpec")) + '</li>';
 
     const locked = !!room.match;
     [[el.joinRed, "red", red], [el.joinBlue, "blue", blue], [el.joinSpec, null, spec]].forEach(([btn, team, list]) => {
@@ -422,11 +472,11 @@
     const canStart = room.hostId === me.id && !room.match && red.length > 0 && blue.length > 0;
     show(el.startBtn, room.hostId === me.id && !room.match);
     el.startBtn.disabled = !canStart;
-    el.startBtn.textContent = canStart ? "MAÇI BAŞLAT" : "HER İKİ TAKIM DA DOLU OLMALI";
+    el.startBtn.textContent = canStart ? t("room.start") : t("room.startNeed");
 
     el.seatHint.textContent = myTeam
       ? ""
-      : " İzleyicisin; oynamak için bir takıma geç.";
+      : t("ctl.specHint");
     updateTurnUI();
   }
 
@@ -439,10 +489,10 @@
         (gi >= 0 && gi === turn ? " is-turn" : "") + (dead ? " is-dead" : "");
       return '<li class="' + cls + '">' +
         '<span class="roster__name">' + esc(m.name) + "</span>" +
-        (m.id === me.id ? '<span class="roster__you">SEN</span>' : "") +
-        (m.id === room.hostId ? '<span class="roster__host">SAHİP</span>' : "") +
+        (m.id === me.id ? '<span class="roster__you">' + esc(t("roster.you")) + '</span>' : "") +
+        (m.id === room.hostId ? '<span class="roster__host">' + esc(t("roster.host")) + '</span>' : "") +
         (room.hostId === me.id && m.id !== me.id
-          ? '<button class="btn btn--ghost btn--sm" type="button" data-kick="' + m.id + '">AT</button>' : "") +
+          ? '<button class="btn btn--ghost btn--sm" type="button" data-kick="' + m.id + '">' + esc(t("roster.kick")) + '</button>' : "") +
         "</li>";
     }).join("");
   }
@@ -474,13 +524,13 @@
     if (!room) return;
     const url = location.origin + "/#/oda/" + room.id;
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(url).then(() => toast("Oda linki kopyalandı."), () => toast(url));
+      navigator.clipboard.writeText(url).then(() => toast(t("toast.linkCopied")), () => toast(url));
     } else toast(url);
   });
 
   function windText(w) {
-    if (typeof w !== "number" || Math.abs(w) < 0.05) return "rüzgâr sakin";
-    return "rüzgâr " + Math.abs(w).toFixed(1) + (w > 0 ? " → sağa" : " ← sola");
+    if (typeof w !== "number" || Math.abs(w) < 0.05) return t("wind.calm");
+    return t(w > 0 ? "wind.right" : "wind.left", { v: Math.abs(w).toFixed(1) });
   }
 
   /* ---------- sohbet ---------- */
@@ -488,8 +538,9 @@
     const atBottom = el.chatLog.scrollHeight - el.chatLog.scrollTop - el.chatLog.clientHeight < 40;
     const div = document.createElement("div");
     if (m.system) {
+      // Sunucu metin değil anahtar yollar; herkes kendi dilinde okur.
       div.className = "msg msg--sys";
-      div.textContent = m.text;
+      div.textContent = t(m.key, m.params);
     } else {
       div.className = "msg" + (m.from === me.id ? " msg--me" : "") + (m.team ? " msg--" + m.team : "");
       div.innerHTML = '<span class="msg__who">' + esc(m.name) + ":</span> " + esc(m.text);
@@ -510,11 +561,11 @@
   /* ---------- maç olayları ---------- */
   net.on("countdown", (m) => {
     let n = m.seconds;
-    overlay("MAÇ BAŞLIYOR", n + "…");
+    overlay(() => ({ title: t("scene.countdown"), text: n + "…" }));
     const iv = setInterval(() => {
       n--;
       if (n <= 0) { clearInterval(iv); hideOverlay(); }
-      else el.overlayText.textContent = n + "…";
+      else redrawOverlay();
     }, 1000);
   });
 
@@ -531,7 +582,7 @@
       });
       myGorilla = gorillaOf(m.players, me.id);
     }
-    el.roundLabel.textContent = "RAUNT " + m.round + "/" + m.totalRounds;
+    el.roundLabel.textContent = t("room.round", { n: m.round, total: m.totalRounds });
     el.windLabel.textContent = windText(m.wind);
     el.redVal.textContent = m.scores.red;
     el.blueVal.textContent = m.scores.blue;
@@ -556,8 +607,8 @@
     phase = "resolving";
     stopTimer();
     setControls(false);
-    el.turnText.textContent = "Muz havada…";
-    view.playShot(m, () => { if (phase === "resolving") el.turnText.textContent = "Sonuç bekleniyor…"; });
+    el.turnText.textContent = t("ctl.flying");
+    view.playShot(m, () => { if (phase === "resolving") el.turnText.textContent = t("ctl.waitResult"); });
     if (room && room.match && m.impact.victim >= 0 && room.match.dead) {
       room.match.dead[m.impact.victim] = true;
     }
@@ -570,34 +621,76 @@
     el.blueVal.textContent = m.scores.blue;
     if (room && room.match) room.match.scores = m.scores;
     if (m.winner) setTimeout(() => view.startDance(m.winner), 400);
-    el.turnText.innerHTML = m.winner
-      ? "<b>" + TEAM_TR[m.winner] + "</b> raundu aldı."
-      : "Raunt berabere bitti.";
+    el.turnText.textContent = m.winner
+      ? t("ctl.roundWon", { team: teamName(m.winner) })
+      : t("ctl.roundDraw");
   });
 
   net.on("matchEnd", (m) => {
     phase = "matchover";
     stopTimer();
     setControls(false);
-    const title = m.winner ? TEAM_TR[m.winner].toLocaleUpperCase("tr") + " KAZANDI" : "BERABERE";
-    overlay(title, "Kırmızı " + m.scores.red + "  —  " + m.scores.blue + " Mavi");
+    /* Kazanan takım adı sahne yazısında büyük harfle geçiyor; Türkçede
+       "i" harfi ancak dil etiketiyle doğru büyür ("Mavi" -> "MAVİ"). */
+    overlay(() => ({
+      title: m.winner
+        ? t("scene.win", { team: teamName(m.winner).toLocaleUpperCase(I18N.get()) })
+        : t("scene.draw"),
+      text: t("scene.score", {
+        redName: teamName("red"), red: m.scores.red,
+        blue: m.scores.blue, blueName: teamName("blue")
+      })
+    }));
     if (room) room.match = null;
-    el.turnText.textContent = "Maç bitti.";
+    el.turnText.textContent = t("ctl.matchOver");
     setTimeout(() => {
       if (phase !== "matchover") return;
       hideOverlay();
       phase = "idle";
-      view.clear("MAÇ BEKLENİYOR");
+      setIdle("scene.waitingMatch");
       renderRoom();
     }, 4500);
   });
 
-  function overlay(title, text) {
-    el.overlayTitle.textContent = title;
-    el.overlayText.textContent = text || "";
-    el.overlay.hidden = false;
+  /* Örtü yazıları piksel fontla canvas'a çizilir; web fontu her boyutta
+     kenar yumuşatması üretiyordu. İçerik bir işlevden okunur ki dil
+     değişince ya da geri sayım ilerleyince aynı yerden yeniden çizilsin. */
+  const OVERLAY_TITLE_SCALE = 3, OVERLAY_TEXT_SCALE = 2;
+  const OVERLAY_TITLE_COLOR = "#FCFC54", OVERLAY_TEXT_COLOR = "#97A3BE";
+  let overlayFn = null;
+
+  function pixLine(host, cv, txt, text, scale, color) {
+    text = text || "";
+    txt.textContent = text;
+    if (text && PixelFont.supports(text)) {
+      const bm = PixelFont.bitmap(text, scale, color);
+      cv.width = bm.width; cv.height = bm.height;
+      const c = cv.getContext("2d");
+      c.imageSmoothingEnabled = false;
+      c.clearRect(0, 0, cv.width, cv.height);
+      c.drawImage(bm, 0, 0);
+      cv.hidden = false;
+      host.classList.add("is-pixel");     // yedek metin ekran okuyucuya kalır
+    } else {
+      cv.hidden = true;                   // piksel fontta olmayan harf: düz metin
+      host.classList.remove("is-pixel");
+    }
   }
-  function hideOverlay() { el.overlay.hidden = true; }
+
+  function overlay(fn) {
+    overlayFn = fn;
+    el.overlay.hidden = false;
+    redrawOverlay();
+  }
+  function redrawOverlay() {
+    if (!overlayFn || el.overlay.hidden) return;
+    const o = overlayFn();
+    pixLine(el.overlayTitle, el.overlayTitleCv, el.overlayTitleTxt,
+      o.title, OVERLAY_TITLE_SCALE, OVERLAY_TITLE_COLOR);
+    pixLine(el.overlayText, el.overlayTextCv, el.overlayTextTxt,
+      o.text, OVERLAY_TEXT_SCALE, OVERLAY_TEXT_COLOR);
+  }
+  function hideOverlay() { overlayFn = null; el.overlay.hidden = true; }
 
   /* ---------- tur kontrolü ---------- */
   function isMyTurn() {
@@ -616,16 +709,17 @@
       const red = room.members.filter((m) => m.team === "red").length;
       const blue = room.members.filter((m) => m.team === "blue").length;
       el.turnText.textContent = (red && blue)
-        ? "Takımlar hazır, oda sahibi maçı başlatabilir."
-        : "Her iki takımda da en az bir oyuncu gerekiyor (" + red + "-" + blue + ").";
+        ? t("ctl.teamsReady")
+        : t("ctl.needPlayers", { red: red, blue: blue });
       return;
     }
     const my = isMyTurn();
     setControls(my);
-    if (phase === "resolving") el.turnText.textContent = "Muz havada…";
-    else if (my) el.turnText.innerHTML = "<b>SIRA SENDE</b> · " + windText(room.match.wind);
-    else el.turnText.innerHTML = "Sıra: <b>" + esc(nameOfTurn()) + "</b> (" +
-      (TEAM_TR[turnTeamOf()] || "—") + ") · " + windText(room.match.wind);
+    const team = turnTeamOf();
+    if (phase === "resolving") el.turnText.textContent = t("ctl.flying");
+    else if (my) el.turnText.innerHTML = "<b>" + esc(t("ctl.yourTurn")) + "</b> · " + esc(windText(room.match.wind));
+    else el.turnText.innerHTML = esc(t("ctl.turnLabel")) + ' <b>' + esc(nameOfTurn()) + "</b> (" +
+      esc(team ? teamName(team) : "—") + ") · " + esc(windText(room.match.wind));
   }
 
   function readouts() {
@@ -689,7 +783,7 @@
   function applySound() {
     view.setSound(soundOn);
     el.soundBtn.setAttribute("aria-pressed", soundOn ? "true" : "false");
-    el.soundBtn.setAttribute("aria-label", soundOn ? "Sesi kapat" : "Sesi aç");
+    el.soundBtn.setAttribute("aria-label", t(soundOn ? "ui.soundOff" : "ui.soundOn"));
     el.soundBtn.querySelector("use").setAttribute("href", soundOn ? "#i-sound" : "#i-mute");
   }
   el.soundBtn.addEventListener("click", () => {
@@ -714,10 +808,10 @@
 
   /* ---------- başlat ---------- */
   readouts();
-  applySound();
-  view.clear("BAĞLANIYOR…");
+  applyI18n();
+  setIdle("scene.connecting");
   if (!me.name) {
-    setTimeout(() => { $("nkName").value = ""; openModal(el.formNick, "TAKMA AD SEÇ"); }, 400);
+    setTimeout(() => { $("nkName").value = ""; openModal(el.formNick, t("modal.nickPick")); }, 400);
   } else {
     el.nickLabel.textContent = me.name;
   }

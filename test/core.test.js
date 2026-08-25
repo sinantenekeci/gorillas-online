@@ -166,17 +166,55 @@ test("atış süresi kare sayısıyla orantılıdır", () => {
 });
 
 /* ---------------- bulutlar (gündüz teması) ---------------- */
-test("bulutlar tohumdan belirlenimci üretilir", () => {
-  assert.deepStrictEqual(core.makeClouds(3141), core.makeClouds(3141));
-  assert.notDeepStrictEqual(core.makeClouds(1), core.makeClouds(2));
+test("bulutlar tohum ve rüzgârdan belirlenimci üretilir", () => {
+  assert.deepStrictEqual(core.makeClouds(3141, 2), core.makeClouds(3141, 2));
+  assert.notDeepStrictEqual(core.makeClouds(1, 2), core.makeClouds(2, 2));
+});
+
+/* Bulut yoğunluğu rüzgâra bağlıdır ama sahneyi doldurmayacak kadar ölçülü:
+   sakin havada 3-4, sert rüzgârda en fazla 7 bulut. */
+test("rüzgâr sertleştikçe bulut yoğunluğu artar", () => {
+  let sakin = 0, sert = 0;
+  for (let seed = 0; seed < 40; seed++) {
+    sakin += core.makeClouds(seed, 0).length;
+    sert += core.makeClouds(seed, 4).length;
+    assert.ok(core.makeClouds(seed, 4).length <= 7, "bulut sayısı 7'yi aşmamalı");
+  }
+  assert.ok(sert > sakin, "sert rüzgârda daha çok bulut olmalı (" + sert + " > " + sakin + ")");
+});
+
+/* Yönü ne olursa olsun aynı şiddetteki rüzgâr aynı yoğunluğu vermeli;
+   yoksa sağa esen ve sola esen odalar farklı görünürdü. */
+test("bulut yoğunluğu rüzgârın yönüne değil şiddetine bağlı", () => {
+  for (let seed = 0; seed < 20; seed++) {
+    assert.deepStrictEqual(core.makeClouds(seed, 3), core.makeClouds(seed, -3));
+  }
+});
+
+/* Bulut kenarları 4 piksellik hücre ızgarasına oturur; ara değer kalırsa
+   büyütülen sahnede yumuşak kenar görünür. */
+test("bulut blokları piksel ızgarasına oturur", () => {
+  for (let seed = 0; seed < 30; seed++) {
+    for (const c of core.makeClouds(seed, 2)) {
+      assert.strictEqual(c.x, Math.round(c.x));
+      assert.strictEqual(c.y, Math.round(c.y));
+      for (const f of c.puffs) {
+        assert.strictEqual(f.dx % core.CLOUD_CELL, 0, "dx hücreye oturmalı");
+        assert.strictEqual(f.dy % core.CLOUD_CELL, 0, "dy hücreye oturmalı");
+        assert.strictEqual(f.w % core.CLOUD_CELL, 0, "genişlik hücreye oturmalı");
+        assert.strictEqual(f.h, core.CLOUD_CELL);
+      }
+    }
+  }
 });
 
 /* Rüzgâr kapalıyken şehir akışında bir rastgele çekim atlanıyor; bulutlar
-   o akışı paylaşsaydı iki istemci farklı bulut görürdü. */
-test("bulutlar rüzgâr ayarından etkilenmez", () => {
-  const a = core.createRound(555, { gravity: 9.8, windOn: true });
-  const b = core.createRound(555, { gravity: 9.8, windOn: false });
-  assert.deepStrictEqual(a.clouds, b.clouds);
+   o akışı paylaşsaydı iki istemci farklı bulut görürdü. Rüzgâr kapalı oda
+   sıfır rüzgâr demek, o yüzden iki taraf da aynı buluta varır. */
+test("rüzgâr kapalı odada bulutlar iki tarafta da aynı", () => {
+  const a = core.createRound(555, { gravity: 9.8, windOn: false });
+  assert.deepStrictEqual(a.clouds, core.makeClouds(555, 0));
+  assert.strictEqual(a.wind, 0);
 });
 
 test("bulutlar bina ve goril tepelerinin üstünde kalır", () => {

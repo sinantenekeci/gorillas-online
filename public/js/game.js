@@ -5,6 +5,7 @@
   "use strict";
 
   const core = global.GorillasCore;
+  const PF = global.PixelFont;
   const W = core.W, H = core.H, GW = core.GW, GH = core.GH, SUN = core.SUN;
 
   /* Gündüz/gece paletleri. Sahne herkeste aynı görünmeli, bu yüzden tema
@@ -51,6 +52,88 @@
     ".BBBB..BBBB."
   ];
 
+  const CLOUD_DRIFT = 0.08;          // rüzgâr birimi başına piksel/kare
+
+  /* Piksel font ölçekleri. Font tam sayı katlarla büyür; isimler ölçek 1'de
+     7 piksel yüksekliğinde, eski 9px Courier'in ~6 pikselinden bir birim
+     büyük ve konturuyla birlikte okunaklı. */
+  const NAME_SCALE = 1, HUD_SCALE = 2, IDLE_SCALE = 2, BUBBLE_SCALE = 1;
+
+  /* ---------- keskin piksel çizimi ----------
+     Canvas'ın arc/lineTo/fillText yolları her zaman kenar yumuşatması üretir.
+     Sahne 960 pikselden ekrana büyütüldüğü için o yarı saydam kenarlar
+     bulanık bloklara dönüşüyordu (en çok güneşin ağzında belli oluyordu).
+     Aşağıdaki yardımcılar aynı şekilleri tam sayı piksellerle çizer;
+     yeni bir şekil eklerken arc/stroke yerine bunları kullanın. */
+  function pxDisc(ctx, cx, cy, r) {
+    cx = Math.round(cx); cy = Math.round(cy); r = Math.round(r);
+    if (r <= 0) return;
+    for (let dy = -r; dy <= r; dy++) {
+      const dx = Math.round(Math.sqrt(r * r - dy * dy));
+      ctx.fillRect(cx - dx, cy + dy, dx * 2 + 1, 1);
+    }
+  }
+
+  function pxLine(ctx, x0, y0, x1, y1) {
+    x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+    const dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1;
+    const dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1;
+    let err = dx + dy;
+    for (;;) {
+      ctx.fillRect(x0, y0, 1, 1);
+      if (x0 === x1 && y0 === y1) return;
+      const e2 = 2 * err;
+      if (e2 >= dy) { err += dy; x0 += sx; }
+      if (e2 <= dx) { err += dx; y0 += sy; }
+    }
+  }
+
+  /* Yay: açı adımlarında kare basar. Üst üste binen kareler zararsız,
+     fillRect saydam olmadığı için kenar yine keskin kalır. */
+  function pxArc(ctx, cx, cy, r, a0, a1, thick) {
+    cx = Math.round(cx); cy = Math.round(cy); thick = thick || 1;
+    const steps = Math.max(8, Math.ceil(Math.abs(a1 - a0) * r * 2));
+    for (let i = 0; i <= steps; i++) {
+      const a = a0 + (a1 - a0) * (i / steps);
+      ctx.fillRect(cx + Math.round(Math.cos(a) * r), cy + Math.round(Math.sin(a) * r), thick, thick);
+    }
+  }
+
+  /* Yarı saydam kenar pikselleri tamamen açık ya da tamamen kapalıya çekilir.
+     Muz gibi eğrisel şekilleri elle piksellemek yerine bir kez çizip
+     sertleştiriyoruz; silueti aynı kalıyor, yumuşak kenarı gidiyor. */
+  function hardenAlpha(ctx, w, h) {
+    const img = ctx.getImageData(0, 0, w, h), d = img.data;
+    for (let i = 3; i < d.length; i += 4) d[i] = d[i] >= 128 ? 255 : 0;
+    ctx.putImageData(img, 0, 0);
+  }
+
+  /* Muz dönerken transform kullanılsaydı kareler yarım piksele düşerdi;
+     bunun yerine 16 dönme adımı bir kez pişirilip hazır bitmap basılıyor. */
+  const BANANA_STEPS = 16, BANANA_BOX = 20;
+  let bananaCache = null;
+
+  function bananaSprites() {
+    if (bananaCache) return bananaCache;
+    bananaCache = [];
+    for (let s = 0; s < BANANA_STEPS; s++) {
+      const cv = document.createElement("canvas");
+      cv.width = cv.height = BANANA_BOX;
+      const c = cv.getContext("2d");
+      c.translate(BANANA_BOX / 2, BANANA_BOX / 2);
+      c.rotate(s * 2 * Math.PI / BANANA_STEPS);
+      c.fillStyle = "#FCFC54";
+      c.beginPath();
+      c.arc(0, 0, 6, 0.15 * Math.PI, 0.85 * Math.PI);
+      c.arc(0, 2.5, 6.5, 0.85 * Math.PI, 0.15 * Math.PI, true);
+      c.closePath(); c.fill();
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      hardenAlpha(c, BANANA_BOX, BANANA_BOX);
+      bananaCache.push(cv);
+    }
+    return bananaCache;
+  }
+
   /* ---------- ses ---------- */
   function Sound() { this.on = true; this.ctx = null; }
   Sound.prototype.ac = function () {
@@ -94,6 +177,9 @@
     this.city = document.createElement("canvas");
     this.city.width = W; this.city.height = H;
     this.cctx = this.city.getContext("2d");
+    // hazır bitmap'ler (yazı, muz, şehir) ara değer üretmeden basılsın
+    this.ctx.imageSmoothingEnabled = false;
+    this.cctx.imageSmoothingEnabled = false;
     this.sound = new Sound();
 
     this.state = null;          // core round state
@@ -113,6 +199,7 @@
     this.xeyes = {};            // i -> olu, gozler x x
     this.bubble = {};           // i -> kufur balonu goruniyor
     this.idleText = "ODA HAZIR";
+    this.teamLabel = { red: "KIRMIZI", blue: "MAVİ" };   // dil seçimiyle değişir
     this.onShotDone = null;
 
     this._last = 0;
@@ -135,6 +222,10 @@
     });
     this.state.wind = msg.wind;               // rüzgâr sunucunun değeriyle sabitlenir
     this.state.gravity = msg.gravity;
+    /* Bulut yoğunluğu rüzgâra bağlı; createRound rüzgârı kendi çektiği için
+       (istemci hep windOn: true veriyor) bulutları gerçek rüzgârla yeniden
+       kuruyoruz. Tohum ve rüzgâr herkeste aynı olduğundan bulutlar da aynı. */
+    this.state.clouds = core.makeClouds(msg.seed, msg.wind);
     if (msg.theme) this.setTheme(msg.theme);
     this.surprisedUntil = 0;
     this.round = msg.round; this.totalRounds = msg.totalRounds;
@@ -198,9 +289,8 @@
     }
     c.save();
     c.globalCompositeOperation = "destination-out";
-    for (const cr of this.state.craters) {
-      c.beginPath(); c.arc(cr.x, cr.y, cr.r, 0, Math.PI * 2); c.fill();
-    }
+    c.fillStyle = "#000";
+    for (const cr of this.state.craters) pxDisc(c, cr.x, cr.y, cr.r);
     c.restore();
   };
 
@@ -208,7 +298,8 @@
     const c = this.cctx;
     c.save();
     c.globalCompositeOperation = "destination-out";
-    c.beginPath(); c.arc(cr.x, cr.y, cr.r, 0, Math.PI * 2); c.fill();
+    c.fillStyle = "#000";
+    pxDisc(c, cr.x, cr.y, cr.r);
     c.restore();
   };
 
@@ -217,11 +308,14 @@
     const body = TEAM_BODY[g.team] || "#A85400";
     opts = opts || {};
     if (opts.lying) {
-      // dusen goril yan yatar; ayaga kalkinca bu donusum kalkar
+      // dusen goril yan yatar; ayaga kalkinca bu donusum kalkar.
+      // Donme merkezi tam sayiya yuvarlanir, yoksa kareler yarim piksele
+      // dusup kenarlari yumusuyor.
+      const cx = Math.round(g.x), cy = Math.round(oy + GH / 2);
       ctx.save();
-      ctx.translate(g.x, oy + GH / 2);
+      ctx.translate(cx, cy);
       ctx.rotate(Math.PI / 2 * ((g.facing || 1) > 0 ? 1 : -1));
-      ctx.translate(-g.x, -(oy + GH / 2));
+      ctx.translate(-cx, -cy);
     }
     for (let r = 0; r < SPRITE.length; r++) {
       for (let col = 0; col < 12; col++) {
@@ -237,44 +331,51 @@
     ctx.fillRect(ox + px * 10, oy + (right ? 4 : 16), px * 2, px * 6);
 
     if (opts.xeyes) {
-      ctx.strokeStyle = "#000"; ctx.lineWidth = 2; ctx.lineCap = "butt";
+      ctx.fillStyle = "#000";
       [3, 8].forEach(function (col) {
         const ex = ox + col * px, ey = oy + 4 * px;
-        ctx.beginPath();
-        ctx.moveTo(ex - 1, ey - 1); ctx.lineTo(ex + 3, ey + 3);
-        ctx.moveTo(ex + 3, ey - 1); ctx.lineTo(ex - 1, ey + 3);
-        ctx.stroke();
+        pxLine(ctx, ex - 1, ey - 1, ex + 2, ey + 2);
+        pxLine(ctx, ex + 2, ey - 1, ex - 1, ey + 2);
       });
     }
     if (opts.lying) ctx.restore();
 
-    if (name) {
-      ctx.font = "bold 9px 'Courier New',monospace";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "bottom";
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = this.pal().label;      // kalabalık sahnede okunurluk için kontur
-      ctx.strokeText(name, g.x, oy - 4);
-      ctx.fillStyle = TEAM_TEXT[g.team] || "#FCFCFC";
-      ctx.fillText(name, g.x, oy - 4);
-      ctx.textAlign = "left";
-      ctx.textBaseline = "top";
+    if (name) this.drawName(name, g, oy - 4);
+  };
+
+  /* İsimler piksel fontla, tek pikselli konturla çizilir. Eski fillText
+     yolunda kontur yumuşatmayla birleşip ismi kimi zaman okunmaz hâle
+     getiriyordu. Piksel fontta olmayan bir harf varsa (Kiril, CJK, emoji)
+     eski yola düşeriz; isim kaybolmasın. */
+  GameView.prototype.drawName = function (name, g, y) {
+    const ctx = this.ctx;
+    const color = TEAM_TEXT[g.team] || "#FCFCFC";
+    if (PF.supports(name)) {
+      PF.blit(ctx, name, g.x, y, NAME_SCALE, color, this.pal().label, "center", "bottom");
+      return;
     }
+    ctx.font = "bold 10px 'Courier New',monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = this.pal().label;
+    ctx.strokeText(name, g.x, y);
+    ctx.fillStyle = color;
+    ctx.fillText(name, g.x, y);
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
   };
 
   /* Duserken cikan kufur balonu; 1 saniye sonra kayboluyor. */
   GameView.prototype.drawBubble = function (x, y, text) {
     const ctx = this.ctx;
-    ctx.font = "bold 10px 'Courier New',monospace";
-    const w = Math.round(ctx.measureText(text).width) + 10, h = 16;
+    const m = PF.measure(text, BUBBLE_SCALE);
+    const w = m.w + 8, h = m.h + 5;
     const bx = Math.round(x - w / 2), by = Math.round(y - h - 6);
     ctx.fillStyle = "#FCFCFC";
     ctx.fillRect(bx, by, w, h);
     ctx.fillRect(Math.round(x) - 3, by + h, 6, 5);
-    ctx.fillStyle = "#000";
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText(text, Math.round(x), by + h / 2);
-    ctx.textAlign = "left"; ctx.textBaseline = "top";
+    PF.draw(ctx, text, bx + 4, by + 2, BUBBLE_SCALE, "#000");
   };
 
   GameView.prototype.drawCelestial = function () {
@@ -282,57 +383,70 @@
     const surprised = Date.now() < this.surprisedUntil;
 
     if (this.theme === "day") {
-      ctx.strokeStyle = p.celestialRay; ctx.lineWidth = 1;
+      ctx.fillStyle = p.celestialRay;
       for (let i = 0; i < 12; i++) {
         const a = i * Math.PI / 6;
-        ctx.beginPath();
-        ctx.moveTo(SUN.x + Math.cos(a) * (SUN.r + 3), SUN.y + Math.sin(a) * (SUN.r + 3));
-        ctx.lineTo(SUN.x + Math.cos(a) * (SUN.r + 8), SUN.y + Math.sin(a) * (SUN.r + 8));
-        ctx.stroke();
+        pxLine(ctx,
+          SUN.x + Math.cos(a) * (SUN.r + 3), SUN.y + Math.sin(a) * (SUN.r + 3),
+          SUN.x + Math.cos(a) * (SUN.r + 8), SUN.y + Math.sin(a) * (SUN.r + 8));
       }
     }
     ctx.fillStyle = p.celestial;
-    ctx.beginPath(); ctx.arc(SUN.x, SUN.y, SUN.r, 0, Math.PI * 2); ctx.fill();
+    pxDisc(ctx, SUN.x, SUN.y, SUN.r);
 
     if (this.theme === "night") {
       ctx.fillStyle = p.celestialRay;
-      ctx.beginPath(); ctx.arc(SUN.x - 5, SUN.y - 4, 2.5, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.arc(SUN.x + 4, SUN.y + 3, 3.5, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.arc(SUN.x + 6, SUN.y - 6, 1.8, 0, Math.PI * 2); ctx.fill();
+      pxDisc(ctx, SUN.x - 5, SUN.y - 4, 2);
+      pxDisc(ctx, SUN.x + 4, SUN.y + 3, 3);
+      pxDisc(ctx, SUN.x + 6, SUN.y - 6, 2);
     }
 
     ctx.fillStyle = p.face;
     if (surprised) {
       ctx.fillRect(SUN.x - 6, SUN.y - 5, 3, 4); ctx.fillRect(SUN.x + 3, SUN.y - 5, 3, 4);
-      ctx.beginPath(); ctx.arc(SUN.x, SUN.y + 4, 4, 0, Math.PI * 2); ctx.fill();
+      pxDisc(ctx, SUN.x, SUN.y + 4, 4);
     } else {
       ctx.fillRect(SUN.x - 5, SUN.y - 4, 2, 3); ctx.fillRect(SUN.x + 3, SUN.y - 4, 2, 3);
-      ctx.beginPath(); ctx.arc(SUN.x, SUN.y + 1, 6, 0.15 * Math.PI, 0.85 * Math.PI);
-      ctx.lineWidth = 2; ctx.strokeStyle = p.face; ctx.stroke();
+      pxArc(ctx, SUN.x, SUN.y + 1, 6, 0.15 * Math.PI, 0.85 * Math.PI, 2);
     }
   };
 
-  /* Bulutlar muzun önüne çizilir (muz arkalarından geçer) ama y aralıkları
-     bina ve goril tepelerinin üstünde kaldığı için onları kapatmazlar. */
+  /* Bulutlar muzun VE güneşin/ayın önüne çizilir; y aralıkları bina ve goril
+     tepelerinin üstünde kaldığı için oyuncuları kapatmazlar. */
   GameView.prototype.drawClouds = function () {
     if (!this.state || !this.state.clouds) return;
     const ctx = this.ctx, p = this.pal();
     for (const c of this.state.clouds) {
-      ctx.fillStyle = c.pale ? p.cloud : p.cloudShade;
-      for (const f of c.puffs) ctx.fillRect(c.x + f.dx, c.y + f.dy, f.w, f.h);
+      for (const f of c.puffs) {
+        ctx.fillStyle = f.shade ? p.cloudShade : p.cloud;
+        ctx.fillRect(c.x + f.dx, c.y + f.dy, f.w, f.h);
+      }
+    }
+  };
+
+  /* Bulutlar rüzgârın yönünde, hızıyla orantılı olarak kayar. Konum kesirli
+     tutulup ekrana yuvarlandığı için ilerleme tam piksel adımlarıyla olur —
+     alt piksel kayması olsa pikseller yine bulanıklaşırdı. Rüzgâr yoksa
+     bulutlar durur. */
+  GameView.prototype.stepClouds = function (dtFrames) {
+    const st = this.state;
+    if (!st || !st.clouds) return;
+    const v = (st.wind || 0) * CLOUD_DRIFT;
+    if (!v) return;
+    for (const c of st.clouds) {
+      if (typeof c.fx !== "number") c.fx = c.x;
+      c.fx += v * dtFrames;
+      if (c.fx > W) c.fx -= W + c.w;
+      else if (c.fx < -c.w) c.fx += W + c.w;
+      c.x = Math.round(c.fx);
     }
   };
 
   GameView.prototype.drawBanana = function (x, y, rot) {
-    const ctx = this.ctx;
-    ctx.save();
-    ctx.translate(x, y); ctx.rotate(rot);
-    ctx.fillStyle = "#FCFC54";
-    ctx.beginPath();
-    ctx.arc(0, 0, 6, 0.15 * Math.PI, 0.85 * Math.PI);
-    ctx.arc(0, 2.5, 6.5, 0.85 * Math.PI, 0.15 * Math.PI, true);
-    ctx.closePath(); ctx.fill();
-    ctx.restore();
+    const sprites = bananaSprites();
+    const turn = Math.round(rot / (2 * Math.PI) * BANANA_STEPS);
+    const i = ((turn % BANANA_STEPS) + BANANA_STEPS) % BANANA_STEPS;
+    this.ctx.drawImage(sprites[i], Math.round(x) - BANANA_BOX / 2, Math.round(y) - BANANA_BOX / 2);
   };
 
   GameView.prototype.drawAim = function () {
@@ -356,9 +470,10 @@
       px = x; py = y;
       if (run >= 17) {
         run = 0; dots++;
-        // gündüz gökyüzü açık olduğu için sarı noktalar kayboluyor; renk temaya bağlı
+        // gündüz gökyüzü açık olduğu için sarı noktalar kayboluyor; renk temaya bağlı.
+        // Daire yerine tam sayı kare: uzaklaştıkça sönen alfa kalır, yumuşak kenar gider.
         ctx.fillStyle = "rgba(" + this.pal().aim + "," + (0.65 - dots * 0.07).toFixed(2) + ")";
-        ctx.beginPath(); ctx.arc(x, y, 2.2, 0, Math.PI * 2); ctx.fill();
+        ctx.fillRect(Math.round(x) - 2, Math.round(y) - 2, 4, 4);
       }
     }
   };
@@ -366,36 +481,26 @@
   /* Raunt yazısı ve rüzgâr oku sahneden kaldırıldı: ikisi de canvas'ın hemen
      üstündeki skor şeridinde yazıyor. Sahnede yalnızca takım skorları kalır. */
   GameView.prototype.drawHud = function () {
-    const ctx = this.ctx;
-    ctx.font = "bold 12px 'Courier New',monospace";
-    ctx.textBaseline = "top";
-    ctx.textAlign = "left";
-    ctx.fillStyle = this.pal().teamHud.red;
-    ctx.fillText("KIRMIZI: " + this.scores.red, 6, 6);
-    ctx.textAlign = "right";
-    ctx.fillStyle = this.pal().teamHud.blue;
-    ctx.fillText("MAVİ: " + this.scores.blue, W - 6, 6);
-    ctx.textAlign = "left";
+    const ctx = this.ctx, p = this.pal();
+    PF.draw(ctx, this.teamLabel.red + ": " + this.scores.red, 6, 6, HUD_SCALE, p.teamHud.red);
+    PF.blit(ctx, this.teamLabel.blue + ": " + this.scores.blue, W - 6, 6,
+      HUD_SCALE, p.teamHud.blue, null, "right", "top");
   };
 
   GameView.prototype.drawBoom = function () {
     const ctx = this.ctx, b = this.boom;
     if (!b || b.r <= 0) return;
     ctx.fillStyle = "#A80000";
-    ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2); ctx.fill();
+    pxDisc(ctx, b.x, b.y, b.r);
     ctx.fillStyle = "#FCFC54";
-    ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 0.6, 0, Math.PI * 2); ctx.fill();
+    pxDisc(ctx, b.x, b.y, b.r * 0.6);
   };
 
   GameView.prototype.drawIdle = function () {
     const ctx = this.ctx, p = this.pal();
     ctx.fillStyle = p.sky; ctx.fillRect(0, 0, W, H);
     this.drawCelestial();
-    ctx.fillStyle = p.idle;
-    ctx.font = "bold 14px 'Courier New',monospace";
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText(this.idleText, W / 2, H / 2);
-    ctx.textAlign = "left"; ctx.textBaseline = "top";
+    PF.blit(ctx, this.idleText, W / 2, H / 2, IDLE_SCALE, p.idle, null, "center", "middle");
   };
 
   GameView.prototype.render = function () {
@@ -564,6 +669,7 @@
     const dtFrames = dt / (1000 / 60);
 
     if (this.state) {
+      this.stepClouds(dtFrames);
       if (this.ban) this.stepFlight(dtFrames);
       else if (this.boom) this.stepBoom(dtFrames);
       else if (this.falls) this.stepFalls(dtFrames);

@@ -30,9 +30,10 @@
   <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a4 4 0 0 0 6 .5l2-2a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 11a4 4 0 0 0-6-.5l-2 2A4 4 0 0 0 11.7 18l1-1"/></symbol>
   <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
   <symbol id="i-boot" viewBox="0 0 24 24"><path d="M12 4v8"/><path d="M7.5 6.5a7 7 0 1 0 9 0"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18"/></symbol>
 </svg>
 
-<a class="skip-link" href="#main">Ana içeriğe atla</a>
+<a class="skip-link" href="#main" data-i18n="ui.skip">Ana içeriğe atla</a>
 
 <header class="topbar">
   <div class="topbar__brand">
@@ -40,16 +41,22 @@
     <h1>GORILLAS<span>ONLINE</span></h1>
   </div>
   <div class="topbar__right">
-    <button id="nickBtn" class="chip" type="button" aria-label="Takma adını değiştir">
+    <button id="nickBtn" class="chip" type="button" data-i18n-aria="ui.nickAria" aria-label="Takma adını değiştir">
       <svg class="ic" aria-hidden="true"><use href="#i-users"/></svg>
       <span id="nickLabel">Goril</span>
     </button>
     <button id="soundBtn" class="chip" type="button" aria-pressed="true" aria-label="Sesi kapat">
       <svg class="ic" aria-hidden="true"><use href="#i-sound"/></svg>
-      <span class="chip__text">SES</span>
+      <span class="chip__text" data-i18n="ui.sound">SES</span>
+    </button>
+    <!-- Dil, kişiye özel bir tercih; oda ayarları oda sahibine ait olduğu için
+         seçenek takma ad ve ses ile aynı kişisel ayar kümesine kondu. -->
+    <button id="langBtn" class="chip" type="button" data-i18n-aria="ui.langAria" aria-label="Dili değiştir">
+      <svg class="ic" aria-hidden="true"><use href="#i-globe"/></svg>
+      <span id="langLabel" class="chip__text">TR</span>
     </button>
     <span id="netStatus" class="status status--wait" role="status">
-      <span class="status__dot" aria-hidden="true"></span><span id="netText">bağlanıyor</span>
+      <span class="status__dot" aria-hidden="true"></span><span id="netText" data-i18n="net.connecting">bağlanıyor</span>
     </span>
   </div>
 </header>
@@ -60,19 +67,19 @@
   <section id="viewLobby" class="view view--lobby">
     <div class="lobby__head">
       <div>
-        <h2 class="h-section">ODALAR</h2>
-        <p class="muted" id="lobbyCount">Sunucuya bağlanılıyor…</p>
+        <h2 class="h-section" data-i18n="lobby.title">ODALAR</h2>
+        <p class="muted" id="lobbyCount" data-i18n="lobby.connecting">Sunucuya bağlanılıyor…</p>
       </div>
       <div class="lobby__actions">
         <label class="field field--inline">
-          <span class="field__label">ARA</span>
-          <input id="roomSearch" type="search" placeholder="oda adı veya kod" autocomplete="off">
+          <span class="field__label" data-i18n="lobby.search">ARA</span>
+          <input id="roomSearch" type="search" data-i18n-ph="lobby.searchPh" placeholder="oda adı veya kod" autocomplete="off">
         </label>
         <button id="refreshBtn" class="btn btn--ghost" type="button">
-          <svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg> YENİLE
+          <svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg> <span data-i18n="lobby.refresh">YENİLE</span>
         </button>
         <button id="createBtn" class="btn btn--primary" type="button">
-          <svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg> ODA KUR
+          <svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg> <span data-i18n="lobby.create">ODA KUR</span>
         </button>
       </div>
     </div>
@@ -84,16 +91,16 @@
       <h3>Ortalık sakin</h3>
       <p class="muted">Henüz açık oda yok. İlk odayı sen kur, linki arkadaşlarına at.</p>
       <button class="btn btn--primary" type="button" data-act="create">
-        <svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg> ODA KUR
+        <svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg> <span data-i18n="lobby.create">ODA KUR</span>
       </button>
     </div>
 
     <section class="howto">
-      <h3 class="h-section">NASIL OYNANIR</h3>
+      <h3 class="h-section" data-i18n="howto.title">NASIL OYNANIR</h3>
       <ol class="howto__list">
-        <li><b>Takım seç.</b> Kırmızı ya da maviye geç; takım başına en fazla 4 kişi sahaya çıkar, kalanlar izler ve sohbet eder.</li>
-        <li><b>Açı ve hızı ayarla.</b> Rüzgâr muzu iter, yerçekimi aşağı çeker. Sıra takımlar arasında dönüşümlü ilerler.</li>
-        <li><b>Rakip takımı temizle.</b> Bir takımın tüm gorilleri düşünce raunt biter; çok raunt alan maçı kazanır.</li>
+        <li><b data-i18n="howto.1b">Takım seç.</b> <span data-i18n="howto.1t">Kırmızı ya da maviye geç; takım başına en fazla 4 kişi sahaya çıkar, kalanlar izler ve sohbet eder.</span></li>
+        <li><b data-i18n="howto.2b">Açı ve hızı ayarla.</b> <span data-i18n="howto.2t">Rüzgâr muzu iter, yerçekimi aşağı çeker. Sıra takımlar arasında dönüşümlü ilerler.</span></li>
+        <li><b data-i18n="howto.3b">Rakip takımı temizle.</b> <span data-i18n="howto.3t">Bir takımın tüm gorilleri düşünce raunt biter; çok raunt alan maçı kazanır.</span></li>
       </ol>
     </section>
   </section>
@@ -103,7 +110,7 @@
     <div class="room__main">
       <div class="room__bar">
         <button id="leaveBtn" class="btn btn--ghost btn--sm" type="button">
-          <svg class="ic" aria-hidden="true"><use href="#i-exit"/></svg> ÇIK
+          <svg class="ic" aria-hidden="true"><use href="#i-exit"/></svg> <span data-i18n="room.leave">ÇIK</span>
         </button>
         <h2 id="roomName" class="room__name">Oda</h2>
         <button id="copyLinkBtn" class="btn btn--ghost btn--sm" type="button">
@@ -111,37 +118,46 @@
           <span id="roomCode">------</span>
         </button>
         <button id="settingsBtn" class="btn btn--ghost btn--sm" type="button" hidden>
-          <svg class="ic" aria-hidden="true"><use href="#i-gear"/></svg> AYARLAR
+          <svg class="ic" aria-hidden="true"><use href="#i-gear"/></svg> <span data-i18n="room.settings">AYARLAR</span>
         </button>
       </div>
 
       <div class="scoreboard">
         <div class="score score--red">
-          <span class="score__name">KIRMIZI</span>
+          <span class="score__name" data-i18n="team.red">KIRMIZI</span>
           <span class="score__val" id="redVal">0</span>
         </div>
         <div class="score__mid">
           <span id="roundLabel">RAUNT –/–</span>
-          <span id="windLabel" class="muted">rüzgâr yok</span>
+          <span id="windLabel" class="muted" data-i18n="wind.on">rüzgâr açık</span>
         </div>
         <div class="score score--blue">
           <span class="score__val" id="blueVal">0</span>
-          <span class="score__name">MAVİ</span>
+          <span class="score__name" data-i18n="team.blue">MAVİ</span>
         </div>
       </div>
 
       <div id="stage" class="stage">
-        <canvas id="c" width="960" height="400" role="img"
+        <canvas id="c" width="960" height="400" role="img" data-i18n-aria="page.canvasAlt"
                 aria-label="Gökdelenlerin üzerinde kırmızı ve mavi takımın gorilleri, aralarında uçan muz"></canvas>
+        <!-- Basliklar piksel fontla canvas'a cizilir: web fontu her boyutta
+             kenar yumusatmasi uretiyordu. Yedek metin ekran okuyucular icin
+             hep DOM'da durur; piksel font harfi desteklemiyorsa gorunur olur. -->
         <div id="overlay" class="overlay" hidden>
-          <h3 id="overlayTitle">BEKLENİYOR</h3>
-          <p id="overlayText" class="muted"></p>
+          <h3 id="overlayTitle" class="pixline">
+            <canvas id="overlayTitleCv" class="pixline__art" aria-hidden="true"></canvas>
+            <span id="overlayTitleTxt" class="pixline__txt">BEKLENİYOR</span>
+          </h3>
+          <p id="overlayText" class="pixline muted">
+            <canvas id="overlayTextCv" class="pixline__art" aria-hidden="true"></canvas>
+            <span id="overlayTextTxt" class="pixline__txt"></span>
+          </p>
         </div>
       </div>
 
       <div class="controls" id="controls">
         <div class="controls__turn">
-          <span id="turnText">Oyuncular bekleniyor…</span>
+          <span id="turnText" data-i18n="ctl.waiting">Oyuncular bekleniyor…</span>
           <span class="timer" id="timerWrap" hidden>
             <span class="timer__bar"><span class="timer__fill" id="timerFill"></span></span>
             <span class="timer__num" id="timerNum">30</span>
@@ -149,17 +165,17 @@
         </div>
         <div class="controls__row">
           <div class="ctl">
-            <label class="field__label" for="ang">AÇI <span class="readout" id="angV">45</span>&deg;</label>
+            <label class="field__label" for="ang"><span data-i18n="ctl.angle">AÇI</span> <span class="readout" id="angV">45</span>&deg;</label>
             <input id="ang" type="range" min="0" max="90" step="1" value="45" disabled>
           </div>
           <div class="ctl">
-            <label class="field__label" for="vel">HIZ <span class="readout" id="velV">50</span></label>
+            <label class="field__label" for="vel"><span data-i18n="ctl.speed">HIZ</span> <span class="readout" id="velV">50</span></label>
             <input id="vel" type="range" min="1" max="200" step="1" value="50" disabled>
           </div>
-          <button id="fireBtn" class="btn btn--accent btn--fire" type="button" disabled>MUZU AT</button>
+          <button id="fireBtn" class="btn btn--accent btn--fire" type="button" data-i18n="ctl.fire" disabled>MUZU AT</button>
         </div>
         <p class="hint">
-          Kaydırıcıları sürükle, <kbd>Enter</kbd> ile at. Noktalar yalnızca çıkış yönünü gösterir.
+          <span data-i18n="ctl.hintA">Kaydırıcıları sürükle,</span> <kbd>Enter</kbd> <span data-i18n="ctl.hintB">ile at. Noktalar yalnızca çıkış yönünü gösterir.</span>
           <span id="seatHint"></span>
         </p>
       </div>
@@ -169,33 +185,33 @@
       <section class="panel panel--players">
         <div class="teams">
           <div class="team team--red">
-            <h3 class="panel__title">KIRMIZI <span id="redCount" class="badge">0</span></h3>
+            <h3 class="panel__title"><span data-i18n="team.red">KIRMIZI</span> <span id="redCount" class="badge">0</span></h3>
             <ul id="redList" class="roster"></ul>
-            <button id="joinRed" class="btn btn--sm btn--full" type="button">GEÇ</button>
+            <button id="joinRed" class="btn btn--sm btn--full" type="button" data-i18n="room.joinTeam">GEÇ</button>
           </div>
           <div class="team team--blue">
-            <h3 class="panel__title">MAVİ <span id="blueCount" class="badge">0</span></h3>
+            <h3 class="panel__title"><span data-i18n="team.blue">MAVİ</span> <span id="blueCount" class="badge">0</span></h3>
             <ul id="blueList" class="roster"></ul>
-            <button id="joinBlue" class="btn btn--sm btn--full" type="button">GEÇ</button>
+            <button id="joinBlue" class="btn btn--sm btn--full" type="button" data-i18n="room.joinTeam">GEÇ</button>
           </div>
         </div>
 
         <h3 class="panel__title">
-          <svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg> İZLEYİCİ
+          <svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg> <span data-i18n="room.spectators">İZLEYİCİ</span>
           <span id="specCount" class="badge">0</span>
         </h3>
         <ul id="specList" class="roster"></ul>
-        <button id="joinSpec" class="btn btn--ghost btn--sm btn--full" type="button">İZLEYİCİYE GEÇ</button>
+        <button id="joinSpec" class="btn btn--ghost btn--sm btn--full" type="button" data-i18n="room.beSpec">İZLEYİCİYE GEÇ</button>
         <button id="startBtn" class="btn btn--accent btn--full" type="button" hidden>MAÇI BAŞLAT</button>
       </section>
 
       <section class="panel panel--chat">
-        <h3 class="panel__title">SOHBET</h3>
+        <h3 class="panel__title" data-i18n="chat.title">SOHBET</h3>
         <div id="chatLog" class="chat" role="log" aria-live="polite" aria-relevant="additions"></div>
         <form id="chatForm" class="chat__form" autocomplete="off">
-          <label class="sr-only" for="chatInput">Mesaj yaz</label>
-          <input id="chatInput" maxlength="200" placeholder="mesaj yaz…">
-          <button class="btn btn--primary btn--icon" type="submit" aria-label="Mesajı gönder">
+          <label class="sr-only" for="chatInput" data-i18n="chat.label">Mesaj yaz</label>
+          <input id="chatInput" maxlength="200" data-i18n-ph="chat.ph" placeholder="mesaj yaz…">
+          <button class="btn btn--primary btn--icon" type="submit" data-i18n-aria="chat.send" aria-label="Mesajı gönder">
             <svg class="ic" aria-hidden="true"><use href="#i-send"/></svg>
           </button>
         </form>
@@ -211,7 +227,7 @@
   <div class="modal__box" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
     <div class="modal__head">
       <h2 id="modalTitle">Başlık</h2>
-      <button class="btn btn--ghost btn--icon" type="button" data-close aria-label="Kapat">
+      <button class="btn btn--ghost btn--icon" type="button" data-close data-i18n-aria="modal.close" aria-label="Kapat">
         <svg class="ic" aria-hidden="true"><use href="#i-close"/></svg>
       </button>
     </div>
@@ -219,77 +235,77 @@
     <!-- oda kurma -->
     <form id="formCreate" class="modal__body" hidden>
       <label class="field">
-        <span class="field__label">ODA ADI</span>
-        <input id="crName" maxlength="24" required placeholder="Muz Ligi">
+        <span class="field__label" data-i18n="modal.roomName">ODA ADI</span>
+        <input id="crName" maxlength="24" required data-i18n-ph="modal.roomNamePh" placeholder="Muz Ligi">
       </label>
       <label class="field">
-        <span class="field__label">ŞİFRE <span class="muted">(boş bırakırsan herkese açık)</span></span>
+        <span class="field__label"><span data-i18n="modal.pass">ŞİFRE</span> <span class="muted" data-i18n="modal.passOpt">(boş bırakırsan herkese açık)</span></span>
         <input id="crPass" type="password" maxlength="64" autocomplete="new-password" placeholder="—">
       </label>
       <div class="grid2">
         <label class="field">
-          <span class="field__label">RAUNT</span>
+          <span class="field__label" data-i18n="modal.rounds">RAUNT</span>
           <select id="crRounds"><option>1</option><option selected>3</option><option>5</option><option>7</option></select>
         </label>
         <label class="field">
-          <span class="field__label">YERÇEKİMİ</span>
+          <span class="field__label" data-i18n="modal.gravity">YERÇEKİMİ</span>
           <select id="crGrav">
-            <option value="1.6">Ay (1.6)</option>
-            <option value="9.8" selected>Dünya (9.8)</option>
-            <option value="24.8">Jüpiter (24.8)</option>
+            <option value="1.6" data-i18n="grav.moon" data-i18n-suffix=" (1.6)">Ay (1.6)</option>
+            <option value="9.8" selected data-i18n="grav.earth" data-i18n-suffix=" (9.8)">Dünya (9.8)</option>
+            <option value="24.8" data-i18n="grav.jupiter" data-i18n-suffix=" (24.8)">Jüpiter (24.8)</option>
           </select>
         </label>
         <label class="field">
-          <span class="field__label">RÜZGÂR</span>
-          <select id="crWind"><option value="1" selected>Açık</option><option value="0">Kapalı</option></select>
+          <span class="field__label" data-i18n="modal.wind">RÜZGÂR</span>
+          <select id="crWind"><option value="1" selected data-i18n="modal.on">Açık</option><option value="0" data-i18n="modal.off">Kapalı</option></select>
         </label>
         <label class="field">
-          <span class="field__label">KİŞİ SINIRI</span>
+          <span class="field__label" data-i18n="modal.maxPlayers">KİŞİ SINIRI</span>
           <select id="crMax"><option>2</option><option>4</option><option selected>8</option><option>12</option><option>16</option></select>
         </label>
         <label class="field">
-          <span class="field__label">TEMA</span>
+          <span class="field__label" data-i18n="modal.theme">TEMA</span>
           <select id="crTheme">
-            <option value="day" selected>Gündüz</option>
-            <option value="night">Gece</option>
+            <option value="day" selected data-i18n="modal.themeDay">Gündüz</option>
+            <option value="night" data-i18n="modal.themeNight">Gece</option>
           </select>
         </label>
         <label class="field field--wide">
-          <span class="field__label">TUR SÜRESİ <span class="readout" id="crTurnV">30</span> sn</span>
+          <span class="field__label"><span data-i18n="modal.turnSec">TUR SÜRESİ</span> <span class="readout" id="crTurnV">30</span> <span data-i18n="modal.sec">sn</span></span>
           <input id="crTurn" type="range" min="10" max="120" step="5" value="30">
         </label>
       </div>
-      <p class="field__help">Şifreli odaya yalnızca şifreyi bilenler girer. Oda son kişi çıkınca silinir.</p>
+      <p class="field__help" data-i18n="modal.createHelp">Şifreli odaya yalnızca şifreyi bilenler girer. Oda son kişi çıkınca silinir.</p>
       <div class="modal__foot">
-        <button class="btn btn--ghost" type="button" data-close>VAZGEÇ</button>
-        <button class="btn btn--primary" type="submit">ODAYI KUR</button>
+        <button class="btn btn--ghost" type="button" data-close data-i18n="modal.cancel">VAZGEÇ</button>
+        <button class="btn btn--primary" type="submit" data-i18n="modal.createBtn">ODAYI KUR</button>
       </div>
     </form>
 
     <!-- sifre sorma -->
     <form id="formJoin" class="modal__body" hidden>
-      <p class="modal__lead" id="joinLead">Bu oda şifreli.</p>
+      <p class="modal__lead" id="joinLead" data-i18n="modal.locked">Bu oda şifreli.</p>
       <label class="field">
-        <span class="field__label">ŞİFRE</span>
+        <span class="field__label" data-i18n="modal.pass">ŞİFRE</span>
         <input id="jnPass" type="password" maxlength="64" autocomplete="current-password" required>
       </label>
       <p class="field__err" id="jnErr" role="alert" hidden></p>
       <div class="modal__foot">
-        <button class="btn btn--ghost" type="button" data-close>VAZGEÇ</button>
-        <button class="btn btn--primary" type="submit">GİR</button>
+        <button class="btn btn--ghost" type="button" data-close data-i18n="modal.cancel">VAZGEÇ</button>
+        <button class="btn btn--primary" type="submit" data-i18n="modal.enter">GİR</button>
       </div>
     </form>
 
     <!-- takma ad -->
     <form id="formNick" class="modal__body" hidden>
       <label class="field">
-        <span class="field__label">TAKMA AD</span>
-        <input id="nkName" maxlength="14" required placeholder="Goril">
+        <span class="field__label" data-i18n="modal.nick">TAKMA AD</span>
+        <input id="nkName" maxlength="14" required data-i18n-ph="modal.nickPh" placeholder="Goril">
       </label>
-      <p class="field__help">En fazla 14 karakter. Aynı odada isim çakışırsa sonuna numara eklenir.</p>
+      <p class="field__help" data-i18n="modal.nickHelp">En fazla 14 karakter. Aynı odada isim çakışırsa sonuna numara eklenir.</p>
       <div class="modal__foot">
-        <button class="btn btn--ghost" type="button" data-close>VAZGEÇ</button>
-        <button class="btn btn--primary" type="submit">KAYDET</button>
+        <button class="btn btn--ghost" type="button" data-close data-i18n="modal.cancel">VAZGEÇ</button>
+        <button class="btn btn--primary" type="submit" data-i18n="modal.save">KAYDET</button>
       </div>
     </form>
 
@@ -297,41 +313,41 @@
     <form id="formSettings" class="modal__body" hidden>
       <div class="grid2">
         <label class="field">
-          <span class="field__label">RAUNT</span>
+          <span class="field__label" data-i18n="modal.rounds">RAUNT</span>
           <select id="stRounds"><option>1</option><option>3</option><option>5</option><option>7</option></select>
         </label>
         <label class="field">
-          <span class="field__label">YERÇEKİMİ</span>
+          <span class="field__label" data-i18n="modal.gravity">YERÇEKİMİ</span>
           <select id="stGrav">
-            <option value="1.6">Ay (1.6)</option>
-            <option value="9.8">Dünya (9.8)</option>
-            <option value="24.8">Jüpiter (24.8)</option>
+            <option value="1.6" data-i18n="grav.moon" data-i18n-suffix=" (1.6)">Ay (1.6)</option>
+            <option value="9.8" data-i18n="grav.earth" data-i18n-suffix=" (9.8)">Dünya (9.8)</option>
+            <option value="24.8" data-i18n="grav.jupiter" data-i18n-suffix=" (24.8)">Jüpiter (24.8)</option>
           </select>
         </label>
         <label class="field">
-          <span class="field__label">RÜZGÂR</span>
-          <select id="stWind"><option value="1">Açık</option><option value="0">Kapalı</option></select>
+          <span class="field__label" data-i18n="modal.wind">RÜZGÂR</span>
+          <select id="stWind"><option value="1" data-i18n="modal.on">Açık</option><option value="0" data-i18n="modal.off">Kapalı</option></select>
         </label>
         <label class="field">
-          <span class="field__label">KİŞİ SINIRI</span>
+          <span class="field__label" data-i18n="modal.maxPlayers">KİŞİ SINIRI</span>
           <select id="stMax"><option>2</option><option>4</option><option>8</option><option>12</option><option>16</option></select>
         </label>
         <label class="field">
-          <span class="field__label">TEMA</span>
+          <span class="field__label" data-i18n="modal.theme">TEMA</span>
           <select id="stTheme">
-            <option value="day">Gündüz</option>
-            <option value="night">Gece</option>
+            <option value="day" data-i18n="modal.themeDay">Gündüz</option>
+            <option value="night" data-i18n="modal.themeNight">Gece</option>
           </select>
         </label>
         <label class="field field--wide">
-          <span class="field__label">TUR SÜRESİ <span class="readout" id="stTurnV">30</span> sn</span>
+          <span class="field__label"><span data-i18n="modal.turnSec">TUR SÜRESİ</span> <span class="readout" id="stTurnV">30</span> <span data-i18n="modal.sec">sn</span></span>
           <input id="stTurn" type="range" min="10" max="120" step="5" value="30">
         </label>
       </div>
-      <p class="field__help">Ayarlar maç sırasında değiştirilemez; bir sonraki maçta geçerli olur.</p>
+      <p class="field__help" data-i18n="modal.settingsHelp">Ayarlar maç sırasında değiştirilemez; bir sonraki maçta geçerli olur.</p>
       <div class="modal__foot">
-        <button class="btn btn--ghost" type="button" data-close>VAZGEÇ</button>
-        <button class="btn btn--primary" type="submit">UYGULA</button>
+        <button class="btn btn--ghost" type="button" data-close data-i18n="modal.cancel">VAZGEÇ</button>
+        <button class="btn btn--primary" type="submit" data-i18n="modal.apply">UYGULA</button>
       </div>
     </form>
   </div>
@@ -340,6 +356,8 @@
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
 <script src="/shared/game-core.js"></script>
+<script src="/js/i18n.js"></script>
+<script src="/js/pixelfont.js"></script>
 <script src="/js/net.js"></script>
 <script src="/js/game.js"></script>
 <script src="/js/app.js"></script>
