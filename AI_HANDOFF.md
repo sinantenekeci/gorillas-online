@@ -4,7 +4,7 @@ Son güncelleme: 2026-08-25
 
 ## Durum
 
-Çalışıyor ve doğrulandı. `npm test` → 92/92 geçiyor. Tarayıcıda sınandı: oda
+Çalışıyor ve doğrulandı. `npm test` → 96/96 geçiyor. Tarayıcıda sınandı: oda
 kurma (şifreli), derin bağlantıyla katılma, sohbet, takım seçimi, 2'ye 2 ve
 4'e 4 maç, sıra devri, atış canlandırması, zemin tahribatı, canlı nişan
 yansıması, gündüz/gece teması, düşme canlandırması, kopma hâlinde hükmen sonuç,
@@ -249,6 +249,17 @@ kuruyor, yoksa rüzgârı kapalı odalarda yoğunluk yanlış çıkardı.
 - **Piksel font önbelleği renge duyarlı.** `PixelFont.bitmap` anahtarında
   metin, ölçek, renk ve kontur var; tema değişince doğru bitmap üretilir.
   Önbellek 240 girdide en eskisini atar.
+- **`destination-in` maskesi TEK fill ile uygulanmalı.** Bu kip her çizim
+  işleminde hedefin kaynak dışında kalan HER YERİNİ siler; döngüyle `fillRect`
+  çağrılırsa ikinci dikdörtgen birincinin bıraktığını da siler. Kopan parçanın
+  sütunları ayrık olduğu için geriye hiçbir piksel kalmıyordu: parça ızgarada
+  duruyor ama ekranda yok, goril görünmez zeminde havada duruyor, muz görünmez
+  zemine çarpıp boşlukta patlıyordu. `cutChunk` artık tek `beginPath/rect/fill`
+  kullanıyor; `test/ui.test.js` bunu sahte canvas ile koruyor.
+- **Tuval ile ızgara ayrışırsa oyuncu bunu "havada duran goril" ya da
+  "boşlukta patlayan muz" olarak görür.** Bu sınıf hata iki kez yaşandı
+  (1 piksel hizalama, sonra maske). Şüphelenince tarayıcı konsolundan
+  `view.terrainMismatch()` çağırın; sıfır dönmeli.
 - **Var olan bir sahnenin binalarını değiştirirseniz `rebuildGrid` çağırın.**
   Izgara binalardan türüyor; `state.buildings` elle değiştirilip ızgara
   bırakılırsa zemin eski şehri anlatmaya devam eder. Uçtan uca testte tam
