@@ -26,6 +26,127 @@ function load(file, extra) {
 const I18N = load("public/js/i18n.js").I18N;
 const PF = load("public/js/pixelfont.js").PixelFont;
 
+/* ---------------- sahte canvas ----------------
+   Kopan parçanın pikselleri "destination-in" ile maskeleniyor. Bu kip,
+   HER çizim işleminde hedefin kaynak dışında kalan her yerini siler; döngüyle
+   fillRect çağrılırsa ikinci dikdörtgen birincinin bıraktığını da siler ve
+   parça tamamen kaybolur. Tam bu hata yaşandı (parça ızgarada duruyor ama
+   ekranda yok). Aşağıdaki sahte bağlam yalnızca ihtiyaç duyulan kipleri,
+   Canvas belirtimindeki anlamlarıyla modelliyor. */
+function fakeCanvas(w, h) {
+  /* Gerçek canvas'ta width/height ataması tamponu YENİDEN kurar ve içeriği
+     siler; stub bunu taklit etmezse testin kendisi yanlış ölçer. */
+  const s = { w: w, h: h, buf: new Uint8Array(w * h) };
+  let mod = "source-over", renk = 1, yol = [];
+
+  function uygulaAlan(rects) {
+    if (mod === "destination-in") {
+      for (let y = 0; y < s.h; y++) {
+        for (let x = 0; x < s.w; x++) {
+          const ic = rects.some((r) => x >= r[0] && x < r[0] + r[2] && y >= r[1] && y < r[1] + r[3]);
+          if (!ic) s.buf[y * s.w + x] = 0;    // kaynak dışındaki HER YER silinir
+        }
+      }
+      return;
+    }
+    for (const r of rects) {
+      for (let y = Math.max(0, r[1]); y < Math.min(s.h, r[1] + r[3]); y++) {
+        for (let x = Math.max(0, r[0]); x < Math.min(s.w, r[0] + r[2]); x++) {
+          s.buf[y * s.w + x] = (mod === "destination-out") ? 0 : renk;
+        }
+      }
+    }
+  }
+
+  const ctx = {
+    imageSmoothingEnabled: true,
+    set fillStyle(v) { renk = 2; }, get fillStyle() { return "#000"; },
+    set globalCompositeOperation(v) { mod = v; }, get globalCompositeOperation() { return mod; },
+    save() { this._y = mod; }, restore() { mod = this._y || "source-over"; },
+    beginPath() { yol = []; },
+    rect(x, y, rw, rh) { yol.push([x, y, rw, rh]); },
+    fill() { uygulaAlan(yol); },
+    fillRect(x, y, rw, rh) { uygulaAlan([[x, y, rw, rh]]); },
+    clearRect(x, y, rw, rh) { const e = mod; mod = "destination-out"; uygulaAlan([[x, y, rw, rh]]); mod = e; },
+    drawImage(src, sx, sy, sw, sh, dx, dy) {
+      if (arguments.length === 3) { sw = src.width; sh = src.height; dx = sx; dy = sy; sx = 0; sy = 0; }
+      for (let y = 0; y < sh; y++) {
+        for (let x = 0; x < sw; x++) {
+          const v = src.__buf()[(sy + y) * src.width + (sx + x)];
+          if (!v) continue;
+          const tx = dx + x, ty = dy + y;
+          if (tx < 0 || ty < 0 || tx >= s.w || ty >= s.h) continue;
+          s.buf[ty * s.w + tx] = v;
+        }
+      }
+    }
+  };
+
+  const cv = {
+    getContext: () => ctx,
+    __buf: () => s.buf,
+    get width() { return s.w; },
+    set width(v) { s.w = v; s.buf = new Uint8Array(s.w * s.h); },
+    get height() { return s.h; },
+    set height(v) { s.h = v; s.buf = new Uint8Array(s.w * s.h); }
+  };
+  return cv;
+}
+
+/* game.js'i Node'da ayaga kaldirir: yalnizca cutChunk'i surmek icin gerekli
+   tarayici parcalari taklit ediliyor. */
+function loadGameView() {
+  const win = { GorillasCore: require(path.join(ROOT, "shared/game-core.js")) };
+  win.PixelFont = load("public/js/pixelfont.js").PixelFont;
+  const doc = { createElement: () => fakeCanvas(core.W, core.H) };
+  const src = fs.readFileSync(path.join(ROOT, "public/js/game.js"), "utf8");
+  new Function("window", "document", "requestAnimationFrame", src)(win, doc, () => 0);
+  return { GameView: win.GameView, doc: doc };
+}
+
+const core = require("../shared/game-core.js");
+
+test("kopan parçanın pikselleri maskelenirken kaybolmaz", () => {
+  const { GameView } = loadGameView();
+  const gv = Object.create(GameView.prototype);
+  gv.city = fakeCanvas(core.W, core.H);
+  gv.cctx = gv.city.getContext("2d");
+
+  // sehir tuvaline dolu bir kule bas
+  gv.cctx.fillStyle = "#0f0";
+  gv.cctx.fillRect(400, 140, 24, 260);
+
+  // ayrik SUTUNLARDAN olusan bir parca kes (hatayi tetikleyen durum buydu)
+  const CELL = core.CELL;
+  const spans = [];
+  for (let cx = 200; cx < 212; cx++) spans.push([cx, 70, 80]);
+  assert.ok(spans.length > 1, "test cok sutunlu bir parca kullanmali");
+
+  const cut = gv.cutChunk(spans);
+  assert.ok(cut, "parça bitmap'i üretilmeli");
+
+  let dolu = 0, beklenen = 0;
+  for (const [cx, cy0, cy1] of spans) {
+    for (let cy = cy0; cy <= cy1; cy++) {
+      for (let dy = 0; dy < CELL; dy++) {
+        for (let dx = 0; dx < CELL; dx++) {
+          beklenen++;
+          const px = cx * CELL + dx - cut.x, py = cy * CELL + dy - cut.y;
+          if (cut.cv.__buf()[py * cut.cv.width + px]) dolu++;
+        }
+      }
+    }
+  }
+  assert.strictEqual(dolu, beklenen,
+    "parçanın TÜM hücreleri bitmap'e taşınmalı (" + dolu + "/" + beklenen + ")");
+
+  // ve o hücreler şehir tuvalinden silinmiş olmalı
+  for (const [cx, cy0] of spans) {
+    const px = cx * CELL, py = cy0 * CELL;
+    assert.strictEqual(gv.city.__buf()[py * core.W + px], 0, "parça şehirden silinmeli");
+  }
+});
+
 /* ---------------- sözlük ---------------- */
 test("her dil aynı anahtar kümesine sahip", () => {
   const tr = Object.keys(I18N.tables.tr).sort();

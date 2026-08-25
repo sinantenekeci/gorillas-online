@@ -376,6 +376,70 @@ test("parça hareketi günlüğe yazılır ve baştan oynatınca aynı zemini ve
   assert.deepStrictEqual(Array.from(gecGelen.grid), Array.from(st.grid));
 });
 
+/* Kullanıcı iki belirti bildirdi: goril havada asılı kaldı, muz boşlukta
+   patladı. İkisi de zeminin "burada bir şey var" demesinden doğar. Aşağıdaki
+   üç tarama, çekirdeğin bu iki durumu hiç üretmediğini rastgele sahnelerde
+   doğruluyor. */
+test("zemin oturduktan sonra hiçbir goril havada kalmaz", () => {
+  let denenen = 0;
+  for (let seed = 0; seed < 60; seed++) {
+    const ilk = core.createRound(seed, { red: 4, blue: 4 });
+    for (const hedef of ilk.gorillas) {
+      for (const derinlik of [40, 70, 100]) {
+        const st = core.createRound(seed, { red: 4, blue: 4 });
+        core.applyCrater(st, { x: hedef.x, y: hedef.y + core.GH + derinlik, r: 24 });
+        core.settleTerrain(st);
+        denenen++;
+        for (let i = 0; i < st.gorillas.length; i++) {
+          const g = st.gorillas[i];
+          if (!g || g.dead) continue;
+          if (g.y + core.GH >= core.H) continue;          // sokak seviyesi
+          assert.ok(core.supportRatio(st, g) >= core.SUPPORT_MIN,
+            "tohum " + seed + " goril " + i + " havada kaldı (y=" + g.y + ")");
+        }
+      }
+    }
+  }
+  assert.ok(denenen > 500, "yeterince sahne denenmeli, denenen: " + denenen);
+});
+
+test("zemin oturduktan sonra havada asılı parça kalmaz", () => {
+  for (let seed = 0; seed < 60; seed++) {
+    const ilk = core.createRound(seed, { red: 4, blue: 4 });
+    for (const hedef of ilk.gorillas) {
+      const st = core.createRound(seed, { red: 4, blue: 4 });
+      core.applyCrater(st, { x: hedef.x, y: hedef.y + core.GH + 70, r: 24 });
+      core.settleTerrain(st);
+      assert.deepStrictEqual(core.detachedChunks(st), [],
+        "tohum " + seed + " sonrası asılı parça kaldı");
+    }
+  }
+});
+
+/* Parçanın ayrıldığı yer gerçekten boşalmalı; kalırsa muz orada patlar. */
+test("kayan parçanın eski yeri boşalır, muz oradan geçer", () => {
+  const st = kuleSahnesi(106);
+  core.applyCrater(st, { x: 420, y: 260, r: 24 });
+  const s = core.settleTerrain(st);
+  assert.strictEqual(s.chunks.length, 1);
+
+  const parca = s.chunks[0];
+  const CELL = core.CELL;
+  for (const [cx, cy0] of parca.spans) {
+    // parçanın en üst hücresi kadar yukarısı artık boş olmalı
+    const x = cx * CELL + 1, y = cy0 * CELL + 1;
+    assert.strictEqual(core.solid(st, x, y), false,
+      "parçanın eski yeri (" + x + "," + y + ") hâlâ katı görünüyor");
+  }
+
+  // muz o boşluktan geçip ilerlemeli, orada durmamalı
+  const tepe = parca.spans[0][1] * CELL + 1;
+  st.gorillas.push({ x: 100, y: tepe - core.GH + 8, dead: false, team: "blue", facing: 1 });
+  const atis = core.simulateShot(st, 1, 0, 200);
+  assert.ok(atis.impact.x > 460,
+    "muz boşalan bölgede durmamalı, durduğu yer: " + atis.impact.x.toFixed(0));
+});
+
 test("canlandırma süresi parça düşüşünü de kapsar", () => {
   const bos = core.settleDurationMs({ chunks: [], falls: [], hits: [] });
   assert.strictEqual(bos, 0, "hiçbir şey olmadıysa bekleme yok");

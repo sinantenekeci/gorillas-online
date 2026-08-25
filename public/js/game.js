@@ -318,6 +318,25 @@
     }
   };
 
+  /* Tanı aracı: şehir tuvali ile fizik ızgarası aynı şeyi mi anlatıyor?
+     Uyuşmazlık, oyuncuya "havada duran goril" ya da "boşlukta patlayan muz"
+     olarak görünür — iki hata da tam olarak böyle ortaya çıktı. Konsoldan
+     `view.terrainMismatch()` ile bakılabilir; sıfır dönmeli. */
+  GameView.prototype.terrainMismatch = function () {
+    if (!this.state) return -1;
+    const CELL = core.CELL;
+    const img = this.cctx.getImageData(0, 0, W, H).data;
+    let fark = 0;
+    for (let cy = 0; cy < core.GROWS; cy++) {
+      for (let cx = 0; cx < core.GCOLS; cx++) {
+        const px = cx * CELL + (CELL >> 1), py = cy * CELL + (CELL >> 1);
+        const boyali = img[(py * W + px) * 4 + 3] > 0;
+        if (boyali !== core.solid(this.state, px, py)) fark++;
+      }
+    }
+    return fark;
+  };
+
   /* Kayan parçanın PİKSELLERİNİ (pencereleriyle birlikte) şehir tuvalinde
      aşağı taşır. Izgara yalnızca katılığı bilir; görüntüyü burada taşımazsak
      moloz eski yerinde durur. */
@@ -346,12 +365,22 @@
     const c = cv.getContext("2d");
     c.imageSmoothingEnabled = false;
     c.drawImage(this.city, x0, y0, w, h, 0, 0, w, h);
-    // yalnızca parçaya ait hücreler kalsın
+
+    /* Yalnızca parçaya ait hücreler kalsın. Maske TEK bir yolla, TEK fill
+       çağrısıyla uygulanmalı: "destination-in" her çizim işleminde hedefin
+       kaynak dışında kalan HER YERİNİ siler. Döngüyle fillRect çağrılırsa
+       ikinci dikdörtgen birincinin bıraktığını da siler; sütunlar ayrık
+       olduğu için geriye hiçbir şey kalmaz ve parça görünmez olur.
+       Tam olarak bu hata yaşandı: parça ızgarada duruyor ama ekranda yok,
+       goril görünmez zeminde havada duruyor gibi görünüyordu.
+       BURAYI DÖNGÜYE ÇEVİRMEYİN. */
     c.globalCompositeOperation = "destination-in";
     c.fillStyle = "#000";
+    c.beginPath();
     for (const s of spans) {
-      c.fillRect(s[0] * CELL - x0, s[1] * CELL - y0, CELL, (s[2] - s[1] + 1) * CELL);
+      c.rect(s[0] * CELL - x0, s[1] * CELL - y0, CELL, (s[2] - s[1] + 1) * CELL);
     }
+    c.fill();
     c.globalCompositeOperation = "source-over";
 
     // parçayı şehirden sil
