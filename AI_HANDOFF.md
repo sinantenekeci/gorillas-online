@@ -4,13 +4,14 @@ Son güncelleme: 2026-08-25
 
 ## Durum
 
-Çalışıyor ve doğrulandı. `npm test` → 105/105 geçiyor. Tarayıcıda sınandı: oda
+Çalışıyor ve doğrulandı. `npm test` → 123/123 geçiyor. Tarayıcıda sınandı: oda
 kurma (şifreli), derin bağlantıyla katılma, sohbet, takım seçimi, 2'ye 2 ve
 4'e 4 maç, sıra devri, atış canlandırması, zemin tahribatı, canlı nişan
 yansıması, gündüz/gece teması, düşme canlandırması, kopma hâlinde hükmen sonuç,
 İngilizce/Türkçe dil değişimi, sistem mesajlarının anahtardan çözülmesi,
 kraterle ikiye ayrılan binanın çökmesi, dengesini yitiren binanın devrilmesi,
-dik eğimde gorilin kayması ve kamera sarsıntısı.
+dik eğimde gorilin kayması, kamera sarsıntısı, kopan bağlantıdan koltuğa
+dönüş ve CPU rakibe karşı maç.
 
 Başlangıç noktası tek dosyalık `gorillas-1.html` idi; fizik ve çizim oradan
 korundu, ağ katmanı etrafına kuruldu.
@@ -98,7 +99,56 @@ Eklenen: her yatay kesitte ağırlık merkezi–dayanma yüzeyi karşılaştırm
 kırılma çizgisinden kopan kütlenin çarpana kadar dönmesi, dik eğimde (55°)
 gorilin kayması. Fizik motoru yok.
 
+## Revize 5 (2026-08-26) — kopan bağlantı, adalet, CPU rakip
+
+Sekiz maddelik tur. Öne çıkanlar:
+
+**Kopan oyuncu elenmiyor.** Telefon arka plana düşünce sunucu 25 saniyede
+soketi kapatıyordu ve bu ANINDA eleme demekti. Artık kalıcı jetonla kimlik
+bağlantıdan bağımsız; kopan oyuncu "yok" işaretleniyor, sırası 8 saniyede
+atlanıyor, koltuğu raunt bitene kadar (ve en az 90 saniye) tutuluyor.
+
+**Bina içindeki yuvarlak delik** bir hata değilmiş: binalar arası 2 piksellik
+boşluk zemine kadar açık bir koridordu, muz oradan iniyordu. Boşluk 6 piksellik
+görünür sokağa çıkarıldı.
+
+**CPU rakip.** Bot odaya normal oyuncu gibi katılıyor; oda sahibi istediği
+takıma istediği zorlukta bot ekliyor.
+
 ## Mimari kararlar (ve nedenleri)
+
+**Oyuncu kimliği bağlantıdan bağımsızdır.** İstemci `localStorage`'da bir jeton
+tutar ve bağlantı adresinde yollar (`/ws?t=…`); dönen bağlantı ESKİ client
+nesnesini devralır, böylece `room.members` ve `match.players` içindeki tüm
+başvurular geçerli kalır ve oyuncu aynı gorili sürmeye devam eder. Yalnızca
+"yok" durumundaki koltuk devralınabilir — aynı jetonla açılan ikinci sekme
+oturan oyuncunun koltuğunu çalamaz.
+
+**Kopma eleme değildir.** Maçta koltuğu olan oyuncu kopunca `absent`
+işaretlenir: gorili yaşar, sırası `ABSENT_SKIP_MS` (8 sn) sonra atlanır.
+Koltuk `ABSENT_GRACE_MS` (90 sn) VE içinde bulunulan raunt bitene kadar
+tutulur; ikisinden hangisi uzunsa o geçerli. Yalnız "raunt bitene kadar"
+deseydik 1v1'de yok olan oyuncu 15-20 saniyede vurulup elenirdi.
+
+**Bot, soketi olmayan sanal bir istemcidir.** `send`'i yayınları yakalar,
+sırası gelince `handle` üzerinden kendi atışını yollar. Böylece sıra, raunt,
+çökme, düşme ve doğrulama mantığının tamamı olduğu gibi çalışır; botun
+ayrıcalığı yoktur. Nişanı önce yansıtır sonra atar, karşıdaki canlı rakip
+görsün diye.
+
+**Bot zorluğu hatanın büyüklüğüdür, hile değil.** Hedefe ulaştıran atış
+analitik olarak çözülür (eğik atış + rüzgâr sabit yatay ivme), üstüne zorluğa
+bağlı hata eklenir ve hata her atışta küçülür — bot ıskaladıkça yaklaşır.
+Ölçülen isabet atışı: zor 3,7 — orta 6,2 — kolay 9,7. Ayar `server/bot.js`
+içindeki `LEVELS` tablosundan yapılır.
+
+**Sıra adaleti kaybeden takıma bağlıdır.** Yeni raunda önceki raundu kaybeden
+takım başlar (`match.lastLoser`); 1v1'de bu "vurulan oyuncu ilk atar" demek.
+
+**Nişan yansıması maçtaki herkese açıktır.** Sırasını bekleyen de kaydırıcı
+oynatıp hazırlanır; çizgisi kendi gorilinden çıkar ve herkese yansır. Atış
+hakkı yalnızca sırası gelende. Sahnede birden çok çizgi olabildiği için
+noktalar takım rengini alır, sırası gelenin çizgisi daha parlak ve uzundur.
 
 **Devrilme ölçütü ağırlık merkezidir, kopma değil.**
 `topplePoint` her yatay kesitte üstteki kütlenin ağırlık merkezini o kesitteki
@@ -302,6 +352,9 @@ kuruyor, yoksa rüzgârı kapalı odalarda yoğunluk yanlış çıkardı.
   "boşlukta patlayan muz" olarak görür.** Bu sınıf hata iki kez yaşandı
   (1 piksel hizalama, sonra maske). Şüphelenince tarayıcı konsolundan
   `view.terrainMismatch()` çağırın; sıfır dönmeli.
+- **Bot adı her raunt değişir ve duyurulmaz.** Sohbeti şişirmesin diye ad
+  değişikliği sistem mesajı üretmez; `match.players` içindeki ad da
+  güncellenir, yoksa sahnede eski ad kalır.
 - **Devrilme sonrası tuvali `paintTopple` boyar; iniş anı ve geç katılım
   AYNI işlevi kullanır.** İki yol farklı piksel üretirse geç gelen, başkalarının
   görmediği bir şehir görür — `drawCity` devrilmeyi hiç oynatmadığı için tam

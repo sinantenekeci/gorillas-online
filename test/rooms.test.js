@@ -697,3 +697,95 @@ test("yeni raunda önceki raundu kaybeden takım başlar", async () => {
   hub.startRound(room);
   assert.strictEqual(room.match.order[0], 0, "kaybeden kırmızı açmalı");
 });
+
+/* ---------------- CPU rakip ----------------
+   Bot odaya normal oyuncu gibi katılır; ayrı bir akış yok. Aşağıdaki testler
+   hem katılımını hem gerçekten oynadığını doğruluyor. */
+const bots = require("../server/bot.js");
+
+test("oda sahibi takıma bot ekleyebilir, başkası ekleyemez", () => {
+  const hub = mkHub();
+  const a = mkClient(hub, "Sahip");
+  hub.handle(a.id, { t: "create", name: "Bot Odası" });
+  const id = a.last("joined").roomId;
+  const b = mkClient(hub, "Yabancı");
+  hub.handle(b.id, { t: "join", roomId: id });
+
+  hub.handle(b.id, { t: "addbot", team: "blue", level: "hard" });
+  assert.ok(b.last("err"), "oda sahibi olmayan bot ekleyememeli");
+
+  hub.handle(a.id, { t: "addbot", team: "blue", level: "hard" });
+  const st = a.last("roomState");
+  const bot = st.members.find((m) => m.bot);
+  assert.ok(bot, "bot listede görünmeli");
+  assert.strictEqual(bot.team, "blue");
+  assert.strictEqual(bot.level, "hard");
+  assert.ok(bot.name.length > 0 && bot.name.length <= 14, "botun adı olmalı");
+});
+
+test("bot takım sınırını aşamaz ve maç sürerken eklenemez", async () => {
+  const hub = mkHub();
+  const a = mkClient(hub, "Sahip");
+  hub.handle(a.id, { t: "create", name: "Sinir", settings: { turnSeconds: 120 } });
+  const id = a.last("joined").roomId;
+  for (let i = 0; i < TEAM_MAX; i++) hub.handle(a.id, { t: "addbot", team: "blue" });
+  assert.strictEqual(hub.rooms.get(id).members.filter((m) => m.team === "blue").length, TEAM_MAX);
+  a.clear();
+  hub.handle(a.id, { t: "addbot", team: "blue" });
+  assert.ok(a.last("err"), "dolu takıma bot eklenememeli");
+
+  hub.handle(a.id, { t: "start" });
+  assert.ok(await until(() => a.last("round"), 3000));
+  a.clear();
+  hub.handle(a.id, { t: "addbot", team: "blue" });
+  assert.ok(a.last("err"), "maç sürerken bot eklenememeli");
+});
+
+test("bot sırası gelince gerçekten atış yapar", async () => {
+  const hub = mkHub(400);
+  const a = mkClient(hub, "Insan");
+  hub.handle(a.id, { t: "create", name: "Bot Mac", settings: { turnSeconds: 120, rounds: 1 } });
+  const id = a.last("joined").roomId;
+  hub.handle(a.id, { t: "addbot", team: "blue", level: "hard" });
+  hub.handle(a.id, { t: "start" });
+  assert.ok(await until(() => a.last("round"), 3000), "maç başlamalı");
+
+  // sırayı bota ver
+  const room = hub.rooms.get(id);
+  const botOyuncu = room.match.players.find((p) => p.id.indexOf("bot-") === 0);
+  assert.ok(botOyuncu, "bot maça girmeli");
+  a.clear();
+  room.match.turnPos = -1;
+  room.match.turn = botOyuncu.gorilla;
+  room.match.phase = "aim";
+  hub.armTurn(room);
+
+  assert.ok(await until(() => a.last("shot"), 6000), "bot atış yapmalı");
+  const atis = a.last("shot");
+  assert.strictEqual(atis.shooter, botOyuncu.gorilla);
+  assert.ok(atis.angle >= 0 && atis.angle <= 90, "açı geçerli aralıkta olmalı");
+  assert.ok(atis.velocity >= 1 && atis.velocity <= 200, "hız geçerli aralıkta olmalı");
+  assert.ok(a.last("aim"), "bot atmadan önce nişanını yansıtmalı");
+});
+
+test("botun adı her raunt değişir", async () => {
+  const hub = mkHub(400);
+  const a = mkClient(hub, "Insan");
+  hub.handle(a.id, { t: "create", name: "Ad", settings: { turnSeconds: 120, rounds: 3 } });
+  const id = a.last("joined").roomId;
+  hub.handle(a.id, { t: "addbot", team: "blue" });
+  hub.handle(a.id, { t: "start" });
+  assert.ok(await until(() => a.last("round"), 3000));
+
+  const room = hub.rooms.get(id);
+  const bot = room.members.find((m) => m.isBot);
+  const adlar = new Set();
+  for (let i = 0; i < 12; i++) {
+    hub.botReceive(bot, { t: "round" });
+    adlar.add(bot.name);
+  }
+  assert.ok(adlar.size > 1, "ad raunttan raunda değişmeli, görülen: " + adlar.size);
+  // maçtaki oyuncu kaydı da güncellenmeli, yoksa sahnede eski ad kalır
+  const p = room.match.players.find((x) => x.id === bot.id);
+  assert.strictEqual(p.name, bot.name, "maç kaydındaki ad da güncellenmeli");
+});

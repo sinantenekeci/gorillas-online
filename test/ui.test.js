@@ -277,3 +277,23 @@ test("harfler tam sayı piksellere basılır", () => {
     assert.strictEqual(h, 2);
   }
 });
+
+/* ---------------- bot adları ---------------- */
+test("bot adları isim sınırına ve piksel fonta uyar", () => {
+  const bots = require(path.join(ROOT, "server/bot.js"));
+  assert.ok(bots.NAMES.length >= 100, "en az 100 ad olmalı, var olan: " + bots.NAMES.length);
+  const tekrar = new Set();
+  for (const ad of bots.NAMES) {
+    assert.ok(ad.length > 0 && ad.length <= 14, "ad 14 karakteri aşmamalı: " + ad);
+    assert.ok(PF.supports(ad), "ad piksel fontta çizilemiyor: " + ad);
+    assert.ok(!tekrar.has(ad), "ad listede iki kez var: " + ad);
+    tekrar.add(ad);
+  }
+});
+
+test("bot zorlukları beklenen sırada", () => {
+  const bots = require(path.join(ROOT, "server/bot.js"));
+  const k = bots.LEVELS.easy, o = bots.LEVELS.normal, z = bots.LEVELS.hard;
+  assert.ok(k.err0 > o.err0 && o.err0 > z.err0, "kolay en çok, zor en az hata yapmalı");
+  assert.ok(k.decay > z.decay, "zor bot hatasını daha hızlı küçültmeli");
+});

@@ -9,6 +9,7 @@
 
 const crypto = require("crypto");
 const core = require("../shared/game-core.js");
+const bots = require("./bot.js");
 
 const MAX_NAME = 14;
 const MAX_ROOM_NAME = 24;
@@ -20,6 +21,7 @@ const LOBBY_DEBOUNCE_MS = 200;
 const MAX_ROOMS = 200;
 const TEAM_MAX = 4;                 // sahada takım başına en fazla oyuncu
 const TEAMS = ["red", "blue"];
+const LEVELS_OK = ["easy", "normal", "hard"];
 /* Kopan oyuncunun koltugu bu sure boyunca tutulur; ayrica icinde bulunulan
    raunt bitene kadar beklenir. Ikisinden hangisi uzunsa o gecerli. */
 const ABSENT_GRACE_MS = 90000;
@@ -99,6 +101,7 @@ class Hub {
     for (const room of this.rooms.values()) {
       this.stopTimer(room);
       if (room.absentTimer) { this.clearTimeout(room.absentTimer); room.absentTimer = null; }
+      room.members.forEach((m) => this.clearBotTimer(m));
     }
     this.rooms.clear();
     this.clients.clear();
@@ -343,6 +346,97 @@ class Hub {
       this.sendRoomList(client);
     }
     this.broadcastRoomList();
+  }
+
+  /* ---------- bot ----------
+     Bot, soketi olmayan sanal bir istemcidir. Odaya normal oyuncu gibi
+     katılır; broadcast'leri `send` ile alır ve sırası geldiğinde kendi
+     atışını `handle` üzerinden yollar. Böylece sıra, raunt, çökme, düşme ve
+     doğrulama mantığının tamamı olduğu gibi çalışır — botun ayrıcalığı yok. */
+  addBot(client, msg) {
+    const room = this.rooms.get(client.roomId);
+    if (!room) return;
+    if (room.hostId !== client.id) return this.err(client, "err.hostOnly");
+    if (room.match) return this.err(client, "err.matchRunning");
+    if (room.members.length >= room.settings.maxPlayers) return this.err(client, "err.roomFull");
+    const team = msg.team === "blue" ? "blue" : "red";
+    if (this.teamOf(room, team).length >= TEAM_MAX) {
+      return this.err(client, "err.teamFull", { max: TEAM_MAX });
+    }
+    const level = LEVELS_OK.indexOf(msg.level) >= 0 ? msg.level : "normal";
+
+    const hub = this;
+    const bot = {
+      id: "bot-" + crypto.randomUUID(),
+      name: bots.randomName(),
+      isBot: true,
+      level: level,
+      shots: 0,
+      timer: null,
+      send(m) { hub.botReceive(bot, m); }
+    };
+    this.addClient(bot);
+    bot.name = this.uniqueName(room, bot.name);
+    bot.roomId = room.id;
+    bot.team = team;
+    room.members.push(bot);
+    this.sys(room, "sys.botJoined", { name: bot.name, level: "level." + level });
+    this.pushRoomState(room);
+    this.broadcastRoomList();
+  }
+
+  /* Bota gelen yayınlar. Yalnız iki mesaj ilgilendiriyor: yeni raunt (ad
+     değişir, atış sayacı sıfırlanır) ve sıra (planla, düşün, at). */
+  botReceive(bot, m) {
+    if (m.t === "round") {
+      bot.shots = 0;
+      this.renameBot(bot);
+      return;
+    }
+    if (m.t !== "turn") return;
+    const room = this.rooms.get(bot.roomId);
+    if (!room || !room.match) return;
+    const p = this.playerByGorilla(room, m.turn);
+    if (!p || p.id !== bot.id) return;
+
+    if (bot.timer) this.clearTimeout(bot.timer);
+    const dusunme = bots.thinkMs(bot.level);
+    /* Nişanı önce yansıtır, sonra atar: karşıdaki oyuncu botun kaydırıcı
+       oynattığını görsün, canlı rakip gibi dursun. */
+    const plan = this.botPlan(room, bot, p.gorilla);
+    bot.timer = this.setTimeout(() => {
+      this.handle(bot.id, { t: "aim", angle: plan.angle, velocity: plan.velocity });
+      bot.timer = this.setTimeout(() => {
+        bot.timer = null;
+        bot.shots++;
+        this.handle(bot.id, { t: "fire", angle: plan.angle, velocity: plan.velocity });
+      }, this.wait(Math.round(dusunme * 0.4)));
+    }, this.wait(Math.round(dusunme * 0.6)));
+  }
+
+  botPlan(room, bot, gorilla) {
+    try {
+      return bots.planShot(room.match.state, gorilla, bot.level, bot.shots);
+    } catch (e) {
+      return { angle: 45, velocity: 80 };          // plan çıkmazsa yine de atsın
+    }
+  }
+
+  /* Bot her raunt yeni bir çizgi film adı alır; sohbeti şişirmesin diye
+     ad değişikliği duyurulmaz. */
+  renameBot(bot) {
+    const room = this.rooms.get(bot.roomId);
+    if (!room) return;
+    bot.name = this.uniqueName(room, bots.randomName());
+    if (room.match) {
+      const p = room.match.players.find((x) => x.id === bot.id);
+      if (p) p.name = bot.name;
+    }
+    this.pushRoomState(room);
+  }
+
+  clearBotTimer(bot) {
+    if (bot && bot.timer) { this.clearTimeout(bot.timer); bot.timer = null; }
   }
 
   /* ---------- takımlar ---------- */
@@ -671,7 +765,10 @@ class Hub {
       hostId: room.hostId,
       teamMax: TEAM_MAX,
       settings: room.settings,
-      members: room.members.map((c) => ({ id: c.id, name: c.name, team: c.team, absent: !!c.absent })),
+      members: room.members.map((c) => ({
+        id: c.id, name: c.name, team: c.team,
+        absent: !!c.absent, bot: !!c.isBot, level: c.isBot ? c.level : null
+      })),
       match: (m && m.state) ? {
         round: m.round,
         totalRounds: m.totalRounds,
@@ -788,6 +885,7 @@ class Hub {
       case "rename": return this.rename(client, msg);
       case "settings": return this.settings(client, msg);
       case "kick": return this.kick(client, msg);
+      case "addbot": return this.addBot(client, msg);
       case "ping": return this.send(client, { t: "pong", ts: msg.ts });
       default: return;
     }

@@ -75,6 +75,8 @@
       "room.start": "MAÇI BAŞLAT",
       "room.startNeed": "HER İKİ TAKIM DA DOLU OLMALI",
       "room.spectators": "İZLEYİCİ",
+      "bot.add": "BOT EKLE",
+      "bot.tag": "BOT",
 
       "team.red": "KIRMIZI",
       "team.blue": "MAVİ",
@@ -195,6 +197,8 @@
       "sys.away": "{name} bağlantısını kaybetti, koltuğu bir süre tutuluyor.",
       "sys.awaySkipped": "{name} bağlantıda değil, sıra geçti.",
       "sys.returned": "{name} geri döndü.",
+      "sys.botJoined": "{name} ({level}) odaya katıldı.",
+      "level.easy": "kolay", "level.normal": "orta", "level.hard": "zor",
       "sys.roundWin": "{team} raundu aldı ({red}-{blue}).",
       "sys.roundDraw": "Raunt berabere bitti.",
       "sys.matchWin": "{team} takım maçı kazandı.",
@@ -265,6 +269,8 @@
       "room.start": "START MATCH",
       "room.startNeed": "BOTH TEAMS NEED PLAYERS",
       "room.spectators": "SPECTATORS",
+      "bot.add": "ADD BOT",
+      "bot.tag": "BOT",
 
       "team.red": "RED",
       "team.blue": "BLUE",
@@ -385,6 +391,8 @@
       "sys.away": "{name} lost connection; the seat is held for a while.",
       "sys.awaySkipped": "{name} is away, turn passed.",
       "sys.returned": "{name} is back.",
+      "sys.botJoined": "{name} ({level}) joined the room.",
+      "level.easy": "easy", "level.normal": "normal", "level.hard": "hard",
       "sys.roundWin": "{team} took the round ({red}-{blue}).",
       "sys.roundDraw": "The round ended in a draw.",
       "sys.matchWin": "{team} won the match.",
@@ -430,16 +438,21 @@
     });
   }
 
-  /* Sunucudan gelen takım anahtarı ("red"/"blue") yerel isme çevrilir;
-     böylece sistem mesajları da seçili dilde okunur. */
-  function resolveTeams(params) {
+  /* Sunucudan gelen anahtar degerleri yerel metne cevrilir: takim adi
+     ("red"/"blue") ve "level.*" gibi ic ice anahtarlar. Boylece sistem
+     mesajlari da secili dilde okunur. */
+  function resolveParams(params) {
     if (!params) return params;
-    var out = null, k;
+    var out = null, k, v;
     for (k in params) {
       if (!Object.prototype.hasOwnProperty.call(params, k)) continue;
-      if (k === "team" && (params[k] === "red" || params[k] === "blue")) {
+      v = params[k];
+      if (k === "team" && (v === "red" || v === "blue")) {
         out = out || Object.assign({}, params);
-        out[k] = t(params[k] === "red" ? "team.redName" : "team.blueName");
+        out[k] = t(v === "red" ? "team.redName" : "team.blueName");
+      } else if (typeof v === "string" && v.indexOf("level.") === 0) {
+        out = out || Object.assign({}, params);
+        out[k] = t(v);
       }
     }
     return out || params;
@@ -450,7 +463,7 @@
     var str = table[key];
     if (str === undefined) str = DICT[FALLBACK][key];
     if (str === undefined) return key;          // eksik anahtar gizlenmesin
-    return fill(str, resolveTeams(params));
+    return fill(str, resolveParams(params));
   }
 
   function set(next) {

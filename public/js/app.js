@@ -24,6 +24,7 @@
     redList: $("redList"), blueList: $("blueList"), specList: $("specList"),
     redCount: $("redCount"), blueCount: $("blueCount"), specCount: $("specCount"),
     joinRed: $("joinRed"), joinBlue: $("joinBlue"), joinSpec: $("joinSpec"), startBtn: $("startBtn"),
+    botBar: $("botBar"), botLevel: $("botLevel"), botRed: $("botRed"), botBlue: $("botBlue"),
     chatLog: $("chatLog"), chatForm: $("chatForm"), chatInput: $("chatInput"),
     modal: $("modalRoot"), modalTitle: $("modalTitle"),
     formCreate: $("formCreate"), formJoin: $("formJoin"), formNick: $("formNick"), formSettings: $("formSettings"),
@@ -482,6 +483,11 @@
       btn.disabled = locked || iAmHere || (team && list.length >= room.teamMax);
     });
 
+    // bot ekleme yalnizca oda sahibine ve mac yokken
+    show(el.botBar, room.hostId === me.id && !room.match);
+    el.botRed.disabled = red.length >= room.teamMax;
+    el.botBlue.disabled = blue.length >= room.teamMax;
+
     const canStart = room.hostId === me.id && !room.match && red.length > 0 && blue.length > 0;
     show(el.startBtn, room.hostId === me.id && !room.match);
     el.startBtn.disabled = !canStart;
@@ -506,6 +512,7 @@
         (m.id === me.id ? '<span class="roster__you">' + esc(t("roster.you")) + '</span>' : "") +
         (m.id === room.hostId ? '<span class="roster__host">' + esc(t("roster.host")) + '</span>' : "") +
         (m.absent ? '<span class="roster__away">AFK</span>' : "") +
+        (m.bot ? '<span class="roster__bot">' + esc(t("bot.tag")) + '</span>' : "") +
         (room.hostId === me.id && m.id !== me.id
           ? '<button class="btn btn--ghost btn--sm" type="button" data-kick="' + m.id + '">' + esc(t("roster.kick")) + '</button>' : "") +
         "</li>";
@@ -528,6 +535,8 @@
   el.joinBlue.addEventListener("click", () => net.send({ t: "team", team: "blue" }));
   el.joinSpec.addEventListener("click", () => net.send({ t: "team", team: "spec" }));
   el.startBtn.addEventListener("click", () => net.send({ t: "start" }));
+  el.botRed.addEventListener("click", () => net.send({ t: "addbot", team: "red", level: el.botLevel.value }));
+  el.botBlue.addEventListener("click", () => net.send({ t: "addbot", team: "blue", level: el.botLevel.value }));
 
   document.addEventListener("click", (e) => {
     const k = e.target.closest("[data-kick]");

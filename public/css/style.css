@@ -396,6 +396,14 @@ main { max-width: 1440px; margin: 0 auto; padding: var(--s5) var(--s4) var(--s7)
 .roster__you { color: var(--warn); font-size: 14px; letter-spacing: .1em; }
 .roster__host { color: var(--ega-cyan); font-size: 14px; letter-spacing: .1em; }
 .roster__away { color: var(--warn); font-size: 14px; letter-spacing: .1em; }
+.roster__bot { color: var(--accent); font-size: 14px; letter-spacing: .1em; }
+
+/* bot ekleme kutusu: yalnizca oda sahibine gorunur */
+.botbar { margin-top: var(--s3); }
+.botbar[hidden] { display: none !important; }
+.botbar__row { display: flex; gap: var(--s2); align-items: stretch; margin-top: var(--s1); }
+.botbar__level { flex: 1 1 auto; min-width: 0; }
+.botbar__row .btn { flex: 0 0 auto; }
 .roster li.is-away { opacity: .6; }
 .roster .btn { margin-left: auto; }
 .roster--empty { color: var(--fg-dim); font-size: 17px; justify-content: center; }

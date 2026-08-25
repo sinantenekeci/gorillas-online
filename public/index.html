@@ -202,6 +202,22 @@
         </h3>
         <ul id="specList" class="roster"></ul>
         <button id="joinSpec" class="btn btn--ghost btn--sm btn--full" type="button" data-i18n="room.beSpec">İZLEYİCİYE GEÇ</button>
+
+        <!-- Oda sahibi eksik yerleri botla doldurabilir; her botun zorlugu
+             ayri secilir, boylece tek basina da oynanabilir. -->
+        <div id="botBar" class="botbar" hidden>
+          <span class="field__label" data-i18n="bot.add">BOT EKLE</span>
+          <div class="botbar__row">
+            <select id="botLevel" class="botbar__level">
+              <option value="easy" data-i18n="level.easy">kolay</option>
+              <option value="normal" selected data-i18n="level.normal">orta</option>
+              <option value="hard" data-i18n="level.hard">zor</option>
+            </select>
+            <button id="botRed" class="btn btn--sm" type="button" data-i18n="team.red">KIRMIZI</button>
+            <button id="botBlue" class="btn btn--sm" type="button" data-i18n="team.blue">MAVİ</button>
+          </div>
+        </div>
+
         <button id="startBtn" class="btn btn--accent btn--full" type="button" hidden>MAÇI BAŞLAT</button>
       </section>
 
