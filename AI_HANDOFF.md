@@ -4,12 +4,13 @@ Son güncelleme: 2026-08-25
 
 ## Durum
 
-Çalışıyor ve doğrulandı. `npm test` → 96/96 geçiyor. Tarayıcıda sınandı: oda
+Çalışıyor ve doğrulandı. `npm test` → 105/105 geçiyor. Tarayıcıda sınandı: oda
 kurma (şifreli), derin bağlantıyla katılma, sohbet, takım seçimi, 2'ye 2 ve
 4'e 4 maç, sıra devri, atış canlandırması, zemin tahribatı, canlı nişan
 yansıması, gündüz/gece teması, düşme canlandırması, kopma hâlinde hükmen sonuç,
 İngilizce/Türkçe dil değişimi, sistem mesajlarının anahtardan çözülmesi,
-kraterle ikiye ayrılan binanın çökmesi ve kamera sarsıntısı.
+kraterle ikiye ayrılan binanın çökmesi, dengesini yitiren binanın devrilmesi,
+dik eğimde gorilin kayması ve kamera sarsıntısı.
 
 Başlangıç noktası tek dosyalık `gorillas-1.html` idi; fizik ve çizim oradan
 korundu, ağ katmanı etrafına kuruldu.
@@ -87,7 +88,48 @@ zemin oturtma 3,9 ms.
 
 Kamera sarsıntısı ve gümbürtü, parça yere değdiğinde tetiklenir.
 
+## Revize 4 (2026-08-25) — devrilen binalar
+
+Kopma testi "yere bağlı mı?" diye soruyordu; hiçbir yerde "ayakta durabilir
+mi?" diye sorulmuyordu. Tabanı bir yandan oyulmuş ama ince bir bacakla hâlâ
+yere bağlı gökdelen sapasağlam sayılıyordu.
+
+Eklenen: her yatay kesitte ağırlık merkezi–dayanma yüzeyi karşılaştırması,
+kırılma çizgisinden kopan kütlenin çarpana kadar dönmesi, dik eğimde (55°)
+gorilin kayması. Fizik motoru yok.
+
 ## Mimari kararlar (ve nedenleri)
+
+**Devrilme ölçütü ağırlık merkezidir, kopma değil.**
+`topplePoint` her yatay kesitte üstteki kütlenin ağırlık merkezini o kesitteki
+dayanma yüzeyiyle karşılaştırır. `TOPPLE_MARGIN` payı sağlam binaların kıl payı
+tetiklemesini önler; sağlam şehirde 60 tohumda ölçülen yanlış bildirim sıfır.
+Payı küçültmek yıkımı artırır, oyunu hızla kel bir sahaya çevirebilir.
+
+**Devrilen kütle çarpana kadar döner, sonra oturur.** `toppleMass` küçük açı
+adımlarıyla döndürüp çarpışmayı sınar; çoğu zaman komşu binaya 10-60 derecede
+yaslanır. Dönme ızgarada TERS eşlemeyle rasterlenir (ileri eşlemede şeklin
+içinde delikler kalıyordu).
+
+**Devrilme düzenlemesi hazır hedef listesi taşır (`{k:"t", from, to}`).**
+Açı yalnızca ÇİZİM için gönderilir. İki tarafın açıdan yeniden hesaplaması
+`Math.cos/sin` motorlar arası bit-eşdeğerli olmadığı için ızgaraları
+ayrıştırırdı — dosyanın başındaki yörünge kararıyla aynı gerekçe.
+
+**Zemin olayları SIRALIDIR.** `settleTerrain`, günlüğe o atışta eklediği dilimi
+`events` olarak döner; istemci olayları sırayla oynatır ve pikselleri ancak
+sırası gelince keser. Hepsini baştan kesmek yanlıştı: ikinci devrilmenin
+kaynağı birincinin indiği hücreleri içerdiğinde o bölge daha tuvale
+basılmamış oluyordu (ölçülen ayrışma 126 hücre). Süre de olayların TOPLAMIdır.
+
+**Bir gorilin tek atıştaki tüm evreleri tek kayda birleşir.** Devrilen binayla
+döner, eğimde kayar, boşluğa düşer — hepsi tek `falls` kaydı olur ve
+"2 goril boyu" kuralı TOPLAM düşüşe uygulanır. Evre evre bakılsaydı iki kısa
+düşüşle uzun bir düşüşten sağ çıkılırdı.
+
+**Dik eğimde kayma kuralı (kullanıcıyla kararlaştırıldı).** Ayağının altındaki
+eğim 55 dereceyi (`SLIDE_DEG`) aşan goril tutunamaz; düz bir platform bulana
+kadar aşağı kayar, düşüş kuralları geçerlidir.
 
 **Zemin bir hücre ızgarasıdır, tek kural vardır.**
 BİR HÜCRE, MERKEZ PİKSELİ ŞEKLİN İÇİNDEYSE DOLUDUR. Bina da krater de aynı
@@ -260,6 +302,13 @@ kuruyor, yoksa rüzgârı kapalı odalarda yoğunluk yanlış çıkardı.
   "boşlukta patlayan muz" olarak görür.** Bu sınıf hata iki kez yaşandı
   (1 piksel hizalama, sonra maske). Şüphelenince tarayıcı konsolundan
   `view.terrainMismatch()` çağırın; sıfır dönmeli.
+- **Devrilme sonrası tuvali `paintTopple` boyar; iniş anı ve geç katılım
+  AYNI işlevi kullanır.** İki yol farklı piksel üretirse geç gelen, başkalarının
+  görmediği bir şehir görür — `drawCity` devrilmeyi hiç oynatmadığı için tam
+  bu yaşandı.
+- **Döndürülmüş bitmap ızgarayı tam kaplamaz.** Izgara ters eşlemeyle deliksiz
+  dolar, tuval ise bitmapi ileri döndürür; kalan tek tek boşluklar görünmez
+  zemin yapar. `paintTopple` hedef hücrelerin altına gövde rengini basıyor.
 - **Var olan bir sahnenin binalarını değiştirirseniz `rebuildGrid` çağırın.**
   Izgara binalardan türüyor; `state.buildings` elle değiştirilip ızgara
   bırakılırsa zemin eski şehri anlatmaya devam eder. Uçtan uca testte tam
