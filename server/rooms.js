@@ -410,11 +410,12 @@ class Hub {
     m.phase = "resolving";
     this.stopTimer(room);
 
-    /* Once carpmayi uygula, sonra ayagi oyulan gorilleri dusur; ikisi de
-       ayni mesajda gider ki istemci sirayla canlandirsin. */
+    /* Once carpmayi uygula, sonra zemini oturt: yere baglantisi kopan bina
+       parcalari duser, ustundeki goril onlarla iner, altta kalan ezilir.
+       Hepsi ayni mesajda gider ki istemci tek bir canlandirmada oynatsin. */
     core.applyImpact(m.state, shot.impact);
     if (shot.sunHit) m.state.sunHit = true;
-    const falls = core.settleGorillas(m.state);
+    const settle = core.settleTerrain(m.state);
 
     this.broadcast(room, {
       t: "shot",
@@ -424,25 +425,33 @@ class Hub {
       frames: shot.frames,
       impact: shot.impact,
       sunHit: shot.sunHit,
-      falls: falls
+      falls: settle.falls,
+      chunks: settle.chunks,
+      hits: settle.hits
     });
 
     room.timer = this.setTimeout(
-      () => this.resolveShot(room, shot, falls),
-      this.wait(core.shotDurationMs(shot) + core.fallDurationMs(falls))
+      () => this.resolveShot(room, shot, settle),
+      this.wait(core.shotDurationMs(shot) + core.settleDurationMs(settle))
     );
   }
 
-  resolveShot(room, shot, falls) {
+  resolveShot(room, shot, settle) {
     if (!room.match) return;
     if (shot.impact.victim >= 0) {
       const victim = this.playerByGorilla(room, shot.impact.victim);
       if (victim) this.sys(room, "sys.hit", { name: victim.name });
     }
-    (falls || []).forEach((f) => {
+    ((settle && settle.falls) || []).forEach((f) => {
       const p = this.playerByGorilla(room, f.i);
       if (!p) return;
-      this.sys(room, f.died ? "sys.fellDead" : "sys.fellSurvived", { name: p.name });
+      if (f.rider) this.sys(room, f.died ? "sys.rodeDead" : "sys.rodeSurvived", { name: p.name });
+      else this.sys(room, f.died ? "sys.fellDead" : "sys.fellSurvived", { name: p.name });
+    });
+    ((settle && settle.hits) || []).forEach((h) => {
+      const p = this.playerByGorilla(room, h.i);
+      if (!p) return;
+      this.sys(room, h.died ? "sys.crushed" : "sys.buried", { name: p.name });
     });
     if (this.checkRoundOver(room)) return;
     this.nextTurn(room);
@@ -551,7 +560,7 @@ class Hub {
         seed: m.state.seed,
         wind: m.state.wind,
         gravity: m.state.gravity,
-        craters: m.state.craters,
+        edits: m.state.edits,
         dead: m.state.gorillas.map((g) => g.dead),
         gy: m.state.gorillas.map((g) => g.y),
         red: m.state.gorillas.filter((g) => g.team === "red").length,

@@ -246,6 +246,56 @@ test("bozuk veri bağlantıyı düşürmez", async () => {
   await a.close();
 });
 
+/* Ikiye ayrilan binanin ust parcasi havada asili kalmamali; sunucu dusen
+   parcayi atis mesajinda bildirmeli ve iki istemci ayni seyi gormeli. */
+test("ikiye ayrılan bina parçası düşer ve atış mesajıyla bildirilir", async () => {
+  const a = await connect("Yikici");
+  await a.wait("welcome");
+  a.send({ t: "create", name: "Cokme Odasi", settings: { rounds: 1, turnSeconds: 120 } });
+  const roomId = (await a.wait("joined")).roomId;
+
+  const b = await connect("Izleyen");
+  await b.wait("welcome");
+  b.send({ t: "join", roomId: roomId });
+  await b.wait("joined");
+  a.send({ t: "start" });
+  await a.wait("round", 6000);
+
+  /* Sahne sabit: atici solda genis bir platformda, ortada ince bir kule.
+     Yatay atis kulenin govdesini vurup ikiye ayiriyor; ust parca kopuyor.
+     Olculer hucre izgarasina hizali (CELL katinda) secildi. */
+  const st = hub.rooms.get(roomId).match.state;
+  st.buildings = [
+    { x: 40, y: 292, w: 60, h: 108, color: "#A8A8A8", windows: [] },   // aticinin platformu
+    { x: 470, y: 150, w: 24, h: 250, color: "#A8A8A8", windows: [] },  // ikiye ayrilacak ince kule
+    { x: 880, y: 300, w: 40, h: 100, color: "#A8A8A8", windows: [] }   // hedefin durdugu yer
+  ];
+  st.edits = [];
+  core.rebuildGrid(st);
+  st.gravity = 0;
+  st.wind = 0;
+  st.gorillas[0].x = 60;  st.gorillas[0].y = 258;   // namlu y = 250
+  st.gorillas[1].x = 900; st.gorillas[1].y = 266;
+
+  a.send({ t: "fire", angle: 0, velocity: 120 });
+
+  const shot = await a.wait("shot");
+  const shot2 = await b.wait("shot");
+  assert.strictEqual(shot.impact.type, "terrain", "muz kuleye çarpmalı");
+  assert.ok(Array.isArray(shot.chunks), "atış mesajı kopan parça listesi taşımalı");
+  assert.strictEqual(shot.chunks.length, 1, "kulenin üst parçası kopmalı");
+  assert.ok(shot.chunks[0].dist > 0, "parça aşağı inmeli");
+  assert.ok(shot.chunks[0].spans.length > 0, "parça sütun aralıklarıyla gelmeli");
+  assert.deepStrictEqual(shot.chunks, shot2.chunks, "iki istemci aynı çöküşü görmeli");
+  assert.deepStrictEqual(shot.hits, shot2.hits);
+
+  // dusus bitince zeminde havada asili parca kalmamali
+  assert.deepStrictEqual(core.detachedChunks(st), [], "çöküşten sonra asılı parça kalmamalı");
+
+  await a.close();
+  await b.close();
+});
+
 test("ayağı oyulan goril düşer ve bu atış mesajıyla bildirilir", async () => {
   const a = await connect("Kazici");
   await a.wait("welcome");

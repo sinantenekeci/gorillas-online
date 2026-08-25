@@ -168,6 +168,19 @@
     const f = a.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 900;
     s.connect(f); f.connect(g); g.connect(a.destination); s.start();
   };
+  /* Moloz yere carpinca duyulan gumburtu: patlamadan daha alcak ve daha uzun. */
+  Sound.prototype.thud = function () {
+    if (!this.on) return;
+    const a = this.ac(); if (!a) return;
+    const len = Math.floor(a.sampleRate * 0.5);
+    const buf = a.createBuffer(1, len, a.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 1.6);
+    const s = a.createBufferSource(); s.buffer = buf;
+    const g = a.createGain(); g.gain.value = 0.26;
+    const f = a.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 220;
+    s.connect(f); f.connect(g); g.connect(a.destination); s.start();
+    this.tone(90, 40, 0.3, "sine", 0.09);
+  };
   Sound.prototype.fanfare = function () {
     if (!this.on) return;
     [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => this.tone(f, f, 0.13, "square", 0.07), i * 110));
@@ -198,6 +211,9 @@
     this.boom = null;
     this.dance = null;
     this.falls = null;          // {list, ...} dusme canlandirmasi
+    this.chunks = null;         // kopup dusen bina parcalari
+    this.hits = null;           // parca altinda kalan goriller
+    this.shake = 0; this.shakeT = 0;
     this.lying = {};            // i -> goril yatay duruyor
     this.xeyes = {};            // i -> olu, gozler x x
     this.bubble = {};           // i -> kufur balonu goruniyor
@@ -237,15 +253,18 @@
     this.turn = typeof msg.turn === "number" ? msg.turn : -1;
     this.arms = this.state.gorillas.map(() => 0);
     this.ban = null; this.boom = null; this.dance = null; this.aim = null;
-    this.falls = null; this.lying = {}; this.xeyes = {}; this.bubble = {};
+    this.falls = null; this.chunks = null; this.hits = null;
+    this.lying = {}; this.xeyes = {}; this.bubble = {};
     this.drawCity();
   };
 
-  /* Odaya sonradan girenin araya kaynaması için: krater ve ölü durumlarını uygular. */
+  /* Odaya sonradan girenin araya kaynaması için: zemin günlüğünü ve ölü
+     durumlarını uygular. Günlük SIRALI oynatılmalı — krater ile parça
+     kaydırmanın sırası değişirse zemin başkalarınınkinden ayrışır. */
   GameView.prototype.applySnapshot = function (m) {
     if (!this.state) return;
-    // krater hem gecmise hem izgaraya islenir; dogrudan push edilirse zemin bayatlar
-    (m.craters || []).forEach((c) => core.applyCrater(this.state, c));
+    this.state.edits = (m.edits || []).slice();
+    core.rebuildGrid(this.state);
     (m.gy || []).forEach((y, i) => { if (this.state.gorillas[i]) this.state.gorillas[i].y = y; });
     (m.dead || []).forEach((d, i) => { if (d && this.state.gorillas[i]) this.state.gorillas[i].dead = true; });
     this.state.sunHit = !!m.sunHit;
@@ -258,7 +277,8 @@
   GameView.prototype.clear = function (text) {
     this.state = null;
     this.ban = null; this.boom = null; this.dance = null; this.aim = null;
-    this.falls = null; this.lying = {}; this.xeyes = {}; this.bubble = {};
+    this.falls = null; this.chunks = null; this.hits = null;
+    this.lying = {}; this.xeyes = {}; this.bubble = {};
     this.players = [];
     this.idleText = text || "OYUNCULAR BEKLENİYOR";
   };
@@ -291,19 +311,73 @@
         c.fillRect(win.x, win.y, 3, 6);
       }
     }
-    c.save();
-    c.globalCompositeOperation = "destination-out";
-    c.fillStyle = "#000";
-    for (const cr of this.state.craters) pxDisc(c, cr.x, cr.y, cr.r);
-    c.restore();
+    // zemin günlüğü sırayla oynatılır: krater oy, parça kaydır, krater oy…
+    for (const e of (this.state.edits || [])) {
+      if (e.k === "c") this.punchCrater(e);
+      else if (e.k === "m") this.shiftCityPixels(e.spans, e.dy * core.CELL);
+    }
   };
 
+  /* Kayan parçanın PİKSELLERİNİ (pencereleriyle birlikte) şehir tuvalinde
+     aşağı taşır. Izgara yalnızca katılığı bilir; görüntüyü burada taşımazsak
+     moloz eski yerinde durur. */
+  GameView.prototype.shiftCityPixels = function (spans, dyPx) {
+    const cut = this.cutChunk(spans);
+    if (!cut) return;
+    this.cctx.drawImage(cut.cv, cut.x, cut.y + dyPx);
+  };
+
+  /* Parçayı şehir tuvalinden keser ve ayrı bir bitmap olarak döndürür.
+     Canlandırma sırasında bu bitmap serbestçe aşağı sürülür, iniş bitince
+     şehir tuvaline geri basılır. */
+  GameView.prototype.cutChunk = function (spans) {
+    if (!spans || !spans.length) return null;
+    const CELL = core.CELL;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const s of spans) {
+      x0 = Math.min(x0, s[0] * CELL); x1 = Math.max(x1, s[0] * CELL + CELL);
+      y0 = Math.min(y0, s[1] * CELL); y1 = Math.max(y1, s[2] * CELL + CELL);
+    }
+    const w = x1 - x0, h = y1 - y0;
+    if (w <= 0 || h <= 0) return null;
+
+    const cv = document.createElement("canvas");
+    cv.width = w; cv.height = h;
+    const c = cv.getContext("2d");
+    c.imageSmoothingEnabled = false;
+    c.drawImage(this.city, x0, y0, w, h, 0, 0, w, h);
+    // yalnızca parçaya ait hücreler kalsın
+    c.globalCompositeOperation = "destination-in";
+    c.fillStyle = "#000";
+    for (const s of spans) {
+      c.fillRect(s[0] * CELL - x0, s[1] * CELL - y0, CELL, (s[2] - s[1] + 1) * CELL);
+    }
+    c.globalCompositeOperation = "source-over";
+
+    // parçayı şehirden sil
+    const cc = this.cctx;
+    cc.save();
+    cc.globalCompositeOperation = "destination-out";
+    cc.fillStyle = "#000";
+    for (const s of spans) {
+      cc.fillRect(s[0] * CELL, s[1] * CELL, CELL, (s[2] - s[1] + 1) * CELL);
+    }
+    cc.restore();
+    return { cv: cv, x: x0, y: y0 };
+  };
+
+  /* Krater, zemin ızgarasıyla AYNI hücrelerden oyulur. Pürüzsüz bir daire
+     çizilseydi tuval ile ızgara bir piksel ayrışır; kopan parça taşındığında
+     o artık pikseller havada asılı kalırdı (ekranda ince çizgi olarak
+     görülmüştü). Kenarın 2 piksellik basamaklı olması bilinçli. */
   GameView.prototype.punchCrater = function (cr) {
-    const c = this.cctx;
+    const c = this.cctx, CELL = core.CELL;
     c.save();
     c.globalCompositeOperation = "destination-out";
     c.fillStyle = "#000";
-    pxDisc(c, cr.x, cr.y, cr.r);
+    core.forEachCraterCell(cr.x, cr.y, cr.r, (cx, cy) => {
+      c.fillRect(cx * CELL, cy * CELL, CELL, CELL);
+    });
     c.restore();
   };
 
@@ -507,13 +581,41 @@
     PF.blit(ctx, this.idleText, W / 2, H / 2, IDLE_SCALE, p.idle, null, "center", "middle", true);
   };
 
+  /* ---------- kamera sarsıntısı ----------
+     Moloz yere çarpınca sahne kısa süre aşağı doğru titrer. Yalnızca DİKEY
+     ve yalnızca aşağı: yana kaydırmak sahnenin kenarında gökyüzü şeridi
+     bırakıyordu. Skor yazısı sarsıntının dışında tutulur, okunaklı kalsın. */
+  const SHAKE_FRAMES = 24, SHAKE_AMP = 5;
+
+  GameView.prototype.startShake = function (strength) {
+    this.shake = Math.max(this.shake || 0, Math.max(0.25, Math.min(1, strength)));
+    this.shakeT = 0;
+  };
+
+  GameView.prototype.stepShake = function (dtFrames) {
+    if (!this.shake) return;
+    this.shakeT += dtFrames;
+    if (this.shakeT >= SHAKE_FRAMES) { this.shake = 0; this.shakeT = 0; }
+  };
+
+  GameView.prototype.shakeY = function () {
+    if (!this.shake) return 0;
+    const sonum = 1 - this.shakeT / SHAKE_FRAMES;
+    return Math.round(Math.abs(Math.sin(this.shakeT * 0.9)) * SHAKE_AMP * sonum * this.shake);
+  };
+
   GameView.prototype.render = function () {
     const ctx = this.ctx;
     if (!this.state) return this.drawIdle();
+    const sy = this.shakeY();
+    ctx.setTransform(1, 0, 0, 1, 0, sy);
     ctx.fillStyle = this.pal().sky;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, -sy - 2, W, H + sy + 4);      // sarsıntıda üstte boşluk kalmasın
     this.drawCelestial();
     ctx.drawImage(this.city, 0, 0);
+    for (const k of (this.chunks || [])) {
+      if (!k.landed) ctx.drawImage(k.cut.cv, k.cut.x, Math.round(k.y));
+    }
     for (let i = 0; i < this.state.gorillas.length; i++) {
       const g = this.state.gorillas[i];
       if (!g) continue;
@@ -530,7 +632,8 @@
     }
     this.drawBoom();
     this.drawClouds();   // muzdan sonra: muz bulutların arkasından geçer
-    this.drawHud();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this.drawHud();      // skor sarsıntıya katılmaz
   };
 
   /* ---------- atış canlandırması ---------- */
@@ -541,6 +644,8 @@
     this.arms[msg.shooter] = facing > 0 ? 2 : 1;
     this.ban = { frames: msg.frames, i: 0, impact: msg.impact, sunHit: msg.sunHit, sunPlayed: false };
     this.pendingFalls = (msg.falls || []).slice();
+    this.pendingChunks = (msg.chunks || []).slice();
+    this.pendingHits = (msg.hits || []).slice();
     this.onShotDone = done || null;
     this.sound.tone(320, 620, 0.12, "square", 0.05);
   };
@@ -598,20 +703,71 @@
   };
 
   /* Sunucunun bildirdigi dusmeleri sirayla canlandirir; istemci kendi
-     fizik hesabini yapmaz, yalnizca gelen listeyi oynatir. */
+     fizik hesabini yapmaz, yalnizca gelen listeyi oynatir.
+     Kopan bina parcalari ve onlarla inen goriller AYNI hizda (FALL_STEP)
+     duser; boylece goril parcanin uzerinde durur gibi gorunur. */
   GameView.prototype.beginFalls = function () {
     const list = (this.pendingFalls || []).filter((f) => this.state.gorillas[f.i]);
-    this.pendingFalls = null;
-    if (!list.length) { this.finishShot(); return; }
+    const parcalar = this.pendingChunks || [];
+    this.hits = this.pendingHits || [];
+    this.pendingFalls = null; this.pendingChunks = null; this.pendingHits = null;
+
+    this.chunks = [];
+    for (const k of parcalar) {
+      const cut = this.cutChunk(k.spans);
+      if (!cut) continue;
+      this.chunks.push({
+        cut: cut, spans: k.spans, dy: k.dy, dist: k.dist,
+        y: cut.y, toY: cut.y + k.dist, landed: false
+      });
+    }
+
+    if (!list.length && !this.chunks.length) {
+      this.applyHits();
+      this.finishShot();
+      return;
+    }
     this.falls = list.map((f) => ({
       i: f.i, toY: f.toY, died: f.died, y: f.fromY, phase: "drop", t: 0
     }));
     this.falls.forEach((f) => { this.state.gorillas[f.i].y = f.y; });
   };
 
+  /* Parça yere oturunca: pikselleri şehre kalıcı olarak bas, zemin günlüğüne
+     işle, ekranı sars ve gümbürtüyü çal. */
+  GameView.prototype.landChunk = function (k) {
+    k.landed = true;
+    this.cctx.drawImage(k.cut.cv, k.cut.x, Math.round(k.toY));
+    core.pushEdit(this.state, { k: "m", spans: k.spans, dy: k.dy });
+    this.startShake(Math.min(1, k.dist / 90));
+    this.sound.thud();
+  };
+
+  /* Kafasına parça düşen goriller: sunucu kimin öldüğünü, kimin molozun
+     üstüne çıktığını söylüyor; istemci yalnızca uygular. */
+  GameView.prototype.applyHits = function () {
+    for (const h of (this.hits || [])) {
+      const g = this.state.gorillas[h.i];
+      if (!g) continue;
+      g.y = h.toY;
+      if (h.died) {
+        g.dead = true;
+        this.lying[h.i] = true;
+        this.xeyes[h.i] = true;
+      }
+    }
+    this.hits = null;
+  };
+
   GameView.prototype.stepFalls = function (dtFrames) {
     let calisan = 0;
-    for (const f of this.falls) {
+    for (const k of (this.chunks || [])) {
+      if (k.landed) continue;
+      calisan++;
+      k.y += core.FALL_STEP * dtFrames;
+      if (k.y >= k.toY) { k.y = k.toY; this.landChunk(k); }
+    }
+    for (const f of this.falls || []) {
       const g = this.state.gorillas[f.i];
       if (f.phase === "drop") {
         calisan++;
@@ -639,7 +795,12 @@
         }
       }
     }
-    if (!calisan) { this.falls = null; this.finishShot(); }
+    if (!calisan) {
+      this.falls = null;
+      this.chunks = null;
+      this.applyHits();
+      this.finishShot();
+    }
   };
 
   GameView.prototype.finishShot = function () {
@@ -674,6 +835,7 @@
 
     if (this.state) {
       this.stepClouds(dtFrames);
+      this.stepShake(dtFrames);
       if (this.ban) this.stepFlight(dtFrames);
       else if (this.boom) this.stepBoom(dtFrames);
       else if (this.falls) this.stepFalls(dtFrames);

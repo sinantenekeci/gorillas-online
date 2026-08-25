@@ -14,6 +14,10 @@
   var DT = 0.01, SUB = 5;        // kare basina 0.05 sn fizik
   var BCOL = ["#A80000", "#A8A8A8", "#00A8A8"];
   var MAX_FLIGHT = 40;           // saniye
+  /* Zemin izgarasinin hucre boyu. Sehir olculeri de buna hizali uretilir;
+     ayrintisi asagidaki "zemin" bolumunde. */
+  var CELL = 2;
+  var GCOLS = W / CELL, GROWS = H / CELL;
 
   /* ---------- belirlenimci rastgelelik ---------- */
   function mulberry32(seed) {
@@ -29,17 +33,21 @@
 
   function makeSeed() { return (Math.random() * 0xFFFFFFFF) >>> 0; }
 
-  /* ---------- sehir ---------- */
+  /* ---------- sehir ----------
+     Bina olculeri zemin izgarasinin hucre boyuna (CELL) hizalidir. Hizasiz
+     olsalardi binanin son 1 piksellik sutunu hicbir hucreye dusmez, kopan
+     parca tasindiginda o sutun havada asili kalirdi — ekranda ince bir cizgi
+     olarak goruluyordu. Yeni olcu ekleyecekseniz CELL katinda tutun. */
   function makeCity(rnd) {
     var buildings = [], x = 2;
     while (x < W - 2) {
-      var w = 32 + Math.floor(rnd() * 28);
-      if (W - 2 - x < w) w = W - 2 - x;
+      var w = 32 + CELL * Math.floor(rnd() * (28 / CELL));
+      if (W - 2 - x < w) w = W - 2 - x - ((W - 2 - x) % CELL);
       if (w < 26) {
         if (buildings.length) buildings[buildings.length - 1].w += w + 2;
         break;
       }
-      var h = 70 + Math.floor(rnd() * 190);
+      var h = 70 + CELL * Math.floor(rnd() * (190 / CELL));
       var b = { x: x, w: w, h: h, y: H - h, color: BCOL[Math.floor(rnd() * 3)], windows: [] };
       for (var wy = b.y + 4; wy < H - 9; wy += 15) {
         for (var wx = b.x + 4; wx < b.x + b.w - 4; wx += 10) {
@@ -189,7 +197,7 @@
       seed: seed,
       buildings: buildings,
       gorillas: gorillas,
-      craters: [],
+      edits: [],
       grid: buildGrid(buildings),
       clouds: makeClouds(seed, wind),
       wind: wind,
@@ -208,9 +216,6 @@
      Kural tek: BİR HÜCRE, MERKEZ PİKSELİ ŞEKLİN İÇİNDEYSE DOLUDUR. Hem bina
      hem krater aynı kuralı kullandığı için iki taraf da aynı ızgaraya varır.
      Çözünürlük 2 piksel; krater kenarındaki sapma en fazla 1 piksel. */
-  var CELL = 2;
-  var GCOLS = W / CELL, GROWS = H / CELL;
-
   function cellCenter(c) { return c * CELL + (CELL >> 1); }
 
   function buildGrid(buildings) {
@@ -228,7 +233,10 @@
     return g;
   }
 
-  function punchGrid(grid, x, y, r) {
+  /* Kraterin sildigi hucreleri gezer. Istemci sehir tuvalini de AYNI
+     hucrelerle oyar; puruzsuz bir daire cizseydi tuval ile izgara 1 piksel
+     ayrisir, kopan parca tasindiginda o artik pikseller havada kalirdi. */
+  function forEachCraterCell(x, y, r, cb) {
     var cx0 = Math.max(0, Math.floor((x - r) / CELL));
     var cx1 = Math.min(GCOLS - 1, Math.floor((x + r) / CELL));
     var cy0 = Math.max(0, Math.floor((y - r) / CELL));
@@ -238,13 +246,32 @@
       dy = cellCenter(cy) - y;
       for (cx = cx0; cx <= cx1; cx++) {
         dx = cellCenter(cx) - x;
-        if (dx * dx + dy * dy <= rr) grid[cy * GCOLS + cx] = 0;
+        if (dx * dx + dy * dy <= rr) cb(cx, cy);
       }
     }
   }
 
+  function punchGrid(grid, x, y, r) {
+    forEachCraterCell(x, y, r, function (cx, cy) { grid[cy * GCOLS + cx] = 0; });
+  }
+
+  /* ---------- düzenleme günlüğü ----------
+     Zeminde olan biten SIRALI bir günlüğe yazılır: krater açmak ve parça
+     kaydırmak. Sıra önemli — önce açılan krater, sonra kayan parça ile
+     tersi farklı zemin verir. Odaya sonradan giren bu günlüğü baştan
+     oynatarak hem ızgarayı hem şehir görüntüsünü yeniden kurar. */
+  function editsOf(state) {
+    if (!state.edits) state.edits = [];
+    return state.edits;
+  }
+
+  function applyEdit(grid, e) {
+    if (e.k === "c") punchGrid(grid, e.x, e.y, e.r);
+    else if (e.k === "m") moveSpans(grid, e.spans, e.dy);
+  }
+
   /* Elle kurulan sahnelerde (testler) ızgara olmayabilir; ilk kullanımda
-     binalardan ve o ana kadarki kraterlerden yeniden üretilir. */
+     binalardan ve o ana kadarki günlükten yeniden üretilir. */
   function gridOf(state) {
     if (!state.grid) rebuildGrid(state);
     return state.grid;
@@ -252,16 +279,21 @@
 
   function rebuildGrid(state) {
     state.grid = buildGrid(state.buildings || []);
-    var cr = state.craters || [];
-    for (var i = 0; i < cr.length; i++) punchGrid(state.grid, cr[i].x, cr[i].y, cr[i].r);
+    var log = state.edits || [];
+    for (var i = 0; i < log.length; i++) applyEdit(state.grid, log[i]);
     return state.grid;
   }
 
-  /* Krateri hem geçmişe hem ızgaraya işler. Doğrudan `state.craters.push`
-     YAPMAYIN — ızgara bayatlar ve zemin sunucuda başka, istemcide başka olur. */
+  /* Zemini değiştiren tek kapı: hem günlüğe hem ızgaraya işler. Izgarayı
+     doğrudan ellemeyin — bayatlarsa zemin sunucuda başka, istemcide başka
+     olur ve iki tarayıcı farklı sonuç görür. */
+  function pushEdit(state, e) {
+    editsOf(state).push(e);
+    applyEdit(gridOf(state), e);
+  }
+
   function applyCrater(state, cr) {
-    state.craters.push(cr);
-    punchGrid(gridOf(state), cr.x, cr.y, cr.r);
+    pushEdit(state, { k: "c", x: cr.x, y: cr.y, r: cr.r });
   }
 
   function solid(state, x, y) {
@@ -377,12 +409,251 @@
     return falls;
   }
 
+  /* ---------- kopan parçalar ----------
+     Krater bir binayı ikiye ayırınca üst parça havada asılı kalıyordu.
+     Çözüm fizik motoru değil bağlantı analizi: zeminden yukarı doğru
+     taşma-doldurma yapılır, ulaşılamayan dolu hücreler kopmuş demektir.
+     Sunucu düşüşü hesaplayıp sonucu yayınlar; istemci yalnızca canlandırır
+     (yörünge ve goril düşüşleriyle aynı düzen). */
+
+  /* Sokak seviyesinden yukarı ulaşılabilen hücreler "yere bağlı"dır. */
+  function groundedMask(grid) {
+    var mark = new Uint8Array(grid.length);
+    var stack = [], cx, i, x, y;
+    for (cx = 0; cx < GCOLS; cx++) {
+      i = (GROWS - 1) * GCOLS + cx;
+      if (grid[i]) { mark[i] = 1; stack.push(i); }
+    }
+    while (stack.length) {
+      i = stack.pop();
+      x = i % GCOLS; y = (i - x) / GCOLS;
+      if (x > 0 && grid[i - 1] && !mark[i - 1]) { mark[i - 1] = 1; stack.push(i - 1); }
+      if (x < GCOLS - 1 && grid[i + 1] && !mark[i + 1]) { mark[i + 1] = 1; stack.push(i + 1); }
+      if (y > 0 && grid[i - GCOLS] && !mark[i - GCOLS]) { mark[i - GCOLS] = 1; stack.push(i - GCOLS); }
+      if (y < GROWS - 1 && grid[i + GCOLS] && !mark[i + GCOLS]) { mark[i + GCOLS] = 1; stack.push(i + GCOLS); }
+    }
+    return mark;
+  }
+
+  /* Hücre listesini sütun aralıklarına çevirir: [[cx, cy0, cy1], ...].
+     Ağdan hücre hücre yollamak yerine bu biçim kullanılıyor; tipik bir parça
+     yüzlerce hücre ama yalnızca birkaç düzine aralık eder. */
+  function spansOf(cells) {
+    var byCol = new Map(), i, cx, cy, list, k;
+    for (i = 0; i < cells.length; i++) {
+      cx = cells[i] % GCOLS; cy = (cells[i] - cx) / GCOLS;
+      if (!byCol.has(cx)) byCol.set(cx, []);
+      byCol.get(cx).push(cy);
+    }
+    var cols = Array.from(byCol.keys()).sort(function (a, b) { return a - b; });
+    var spans = [];
+    for (i = 0; i < cols.length; i++) {
+      list = byCol.get(cols[i]).sort(function (a, b) { return a - b; });
+      var bas = list[0], son = list[0];
+      for (k = 1; k < list.length; k++) {
+        if (list[k] === son + 1) { son = list[k]; continue; }
+        spans.push([cols[i], bas, son]); bas = list[k]; son = list[k];
+      }
+      spans.push([cols[i], bas, son]);
+    }
+    return spans;
+  }
+
+  function cellsOfSpans(spans) {
+    var cells = [], i, cy;
+    for (i = 0; i < spans.length; i++) {
+      for (cy = spans[i][1]; cy <= spans[i][2]; cy++) cells.push(cy * GCOLS + spans[i][0]);
+    }
+    return cells;
+  }
+
+  function moveSpans(grid, spans, dy) {
+    var cells = cellsOfSpans(spans), i, hedef;
+    for (i = 0; i < cells.length; i++) grid[cells[i]] = 0;
+    for (i = 0; i < cells.length; i++) {
+      hedef = cells[i] + dy * GCOLS;
+      if (hedef >= 0 && hedef < grid.length) grid[hedef] = 1;
+    }
+  }
+
+  /* Yere bağlı olmayan dolu hücreleri bağlantılı bileşenlere ayırır. */
+  function detachedChunks(state) {
+    var grid = gridOf(state);
+    var grounded = groundedMask(grid);
+    var seen = new Uint8Array(grid.length);
+    var out = [], cx, cy, i;
+    for (cy = GROWS - 1; cy >= 0; cy--) {
+      for (cx = 0; cx < GCOLS; cx++) {
+        i = cy * GCOLS + cx;
+        if (!grid[i] || grounded[i] || seen[i]) continue;
+        out.push(collectChunk(grid, grounded, seen, i));
+      }
+    }
+    return out;
+  }
+
+  function collectChunk(grid, grounded, seen, start) {
+    var stack = [start], cells = [], i, x, y, j;
+    seen[start] = 1;
+    while (stack.length) {
+      i = stack.pop();
+      cells.push(i);
+      x = i % GCOLS; y = (i - x) / GCOLS;
+      if (x > 0) { j = i - 1; if (grid[j] && !grounded[j] && !seen[j]) { seen[j] = 1; stack.push(j); } }
+      if (x < GCOLS - 1) { j = i + 1; if (grid[j] && !grounded[j] && !seen[j]) { seen[j] = 1; stack.push(j); } }
+      if (y > 0) { j = i - GCOLS; if (grid[j] && !grounded[j] && !seen[j]) { seen[j] = 1; stack.push(j); } }
+      if (y < GROWS - 1) { j = i + GCOLS; if (grid[j] && !grounded[j] && !seen[j]) { seen[j] = 1; stack.push(j); } }
+    }
+    cells.sort(function (a, b) { return a - b; });
+    return { cells: cells, set: new Set(cells), spans: spansOf(cells) };
+  }
+
+  /* Parça, kendi hücreleri dışında bir doluya ya da tabana çarpana kadar
+     kaç hücre inebilir? Sütun sütun bakıp en kısıtlayıcı olanı alıyoruz. */
+  function chunkDrop(grid, chunk) {
+    var best = GROWS, i, cx, cy, ny, j, d;
+    for (i = 0; i < chunk.cells.length; i++) {
+      cx = chunk.cells[i] % GCOLS; cy = (chunk.cells[i] - cx) / GCOLS;
+      d = 0;
+      for (ny = cy + 1; ny < GROWS; ny++) {
+        j = ny * GCOLS + cx;
+        if (grid[j] && !chunk.set.has(j)) break;
+        d++;
+      }
+      if (d < best) best = d;
+      if (best === 0) return 0;
+    }
+    return best;
+  }
+
+  function chunkBottom(chunk) {
+    var son = chunk.cells[chunk.cells.length - 1];
+    return (son - (son % GCOLS)) / GCOLS;
+  }
+
+  /* Parçanın üstünde duran goriller onunla birlikte iner. Ölçü, gorilin
+     tabanının ne kadarının bu parçaya bastığı — settleGorillas ile aynı eşik. */
+  function ridersOf(state, chunk) {
+    var out = [], gi, g, lo, hi, x, total, on, cy;
+    for (gi = 0; gi < state.gorillas.length; gi++) {
+      g = state.gorillas[gi];
+      if (!g || g.dead) continue;
+      cy = Math.floor((g.y + GH) / CELL);
+      if (cy < 0 || cy >= GROWS) continue;
+      lo = Math.round(g.x - GW / 2); hi = Math.round(g.x + GW / 2);
+      total = 0; on = 0;
+      for (x = lo; x <= hi; x++) {
+        if (x < 0 || x >= W) continue;
+        total++;
+        if (chunk.set.has(cy * GCOLS + Math.floor(x / CELL))) on++;
+      }
+      if (total && on / total >= SUPPORT_MIN) out.push(gi);
+    }
+    return out;
+  }
+
+  /* Kayan parçanın kutusu gorilin kutusuyla çakışıyor mu? */
+  function chunkHitsGorilla(chunk, dy, g) {
+    var lo = g.x - GW / 2, hi = g.x + GW / 2;
+    var cx0 = Math.floor(lo / CELL), cx1 = Math.floor(hi / CELL);
+    var cy0 = Math.floor(g.y / CELL), cy1 = Math.floor((g.y + GH) / CELL);
+    for (var i = 0; i < chunk.cells.length; i++) {
+      var hedef = chunk.cells[i] + dy * GCOLS;
+      var cx = hedef % GCOLS, cy = (hedef - cx) / GCOLS;
+      if (cx >= cx0 && cx <= cx1 && cy >= cy0 && cy <= cy1) return true;
+    }
+    return false;
+  }
+
+  /* Gorilin x aralığındaki en üst katı zemin: ezilmeden kurtulan goril
+     molozun üstüne çıkarılır, taşın içinde gömülü kalmaz. */
+  function surfaceUnder(state, g) {
+    var grid = gridOf(state);
+    var lo = Math.max(0, Math.floor((g.x - GW / 2) / CELL));
+    var hi = Math.min(GCOLS - 1, Math.floor((g.x + GW / 2) / CELL));
+    var cx, cy;
+    for (cy = 0; cy < GROWS; cy++) {
+      for (cx = lo; cx <= hi; cx++) {
+        if (grid[cy * GCOLS + cx]) return cy * CELL;
+      }
+    }
+    return H;
+  }
+
+  /* Kopan parçaları düşürür, gorilleri buna göre taşır.
+     Döner: { chunks: [{spans, dy, dist}], falls: [...], hits: [{i, toY, died}] }
+
+     Kurallar (kullanıcıyla kararlaştırıldı):
+       - Parçayla birlikte inen goril, mevcut "2 goril boyu" kuralına tabi.
+       - Kafasına parça düşen goril, ancak parça 2 goril boyundan yüksekten
+         geldiyse ölür; daha kısa düşüşte molozun üstüne çıkar. */
+  function settleTerrain(state) {
+    var grid = gridOf(state);
+    var chunks = detachedChunks(state);
+    var moved = [], falls = [], hits = [], i;
+
+    // en alttaki parça önce insin ki üstteki, altındakinin yeni yerini görsün
+    chunks.sort(function (a, b) { return chunkBottom(b) - chunkBottom(a); });
+
+    for (i = 0; i < chunks.length; i++) {
+      var ch = chunks[i];
+      var dy = chunkDrop(grid, ch);
+      if (dy <= 0) continue;                       // kopmuş ama bir yere yaslanmış
+      var dist = dy * CELL;
+      var riders = ridersOf(state, ch);
+
+      pushEdit(state, { k: "m", spans: ch.spans, dy: dy });
+      moved.push({ spans: ch.spans, dy: dy, dist: dist });
+
+      riders.forEach(function (gi) {
+        var g = state.gorillas[gi];
+        var fromY = g.y, died = dist > FATAL_FALL;
+        g.y = fromY + dist;
+        if (died) g.dead = true;
+        falls.push({ i: gi, fromY: fromY, toY: g.y, dist: dist, died: died, rider: true });
+      });
+
+      for (var gi = 0; gi < state.gorillas.length; gi++) {
+        var g = state.gorillas[gi];
+        if (!g || g.dead || riders.indexOf(gi) >= 0) continue;
+        if (!chunkHitsGorilla(ch, dy, g)) continue;
+        if (dist >= FATAL_FALL) {
+          g.dead = true;
+          hits.push({ i: gi, toY: g.y, died: true });
+        } else {
+          g.y = Math.max(0, surfaceUnder(state, g) - GH);
+          hits.push({ i: gi, toY: g.y, died: false });
+        }
+      }
+    }
+
+    // parçayla inmeyen ama zemini kaybeden goriller
+    settleGorillas(state).forEach(function (f) { falls.push(f); });
+    return { chunks: moved, falls: falls, hits: hits };
+  }
+
   /* Dusme canlandirmasinin suresi; sunucu siradaki turu bundan once acmaz. */
   function fallDurationMs(falls) {
     if (!falls || !falls.length) return 0;
     var max = 0;
     for (var i = 0; i < falls.length; i++) if (falls[i].dist > max) max = falls[i].dist;
     return Math.round((max / FALL_STEP) * (1000 / 60)) + 1400;   // dusus + kufur balonu + dogrulma
+  }
+
+  /* Parça düşüşü ve goril düşüşü aynı anda, aynı hızda oynatılıyor; süre
+     ikisinin en uzunundan hesaplanır. Sunucu sıradaki turu bundan önce açmaz,
+     yoksa moloz hâlâ havadayken yeni atış başlar. */
+  function settleDurationMs(settle) {
+    if (!settle) return 0;
+    var enUzun = 0, i;
+    for (i = 0; i < settle.falls.length; i++) {
+      if (settle.falls[i].dist > enUzun) enUzun = settle.falls[i].dist;
+    }
+    for (i = 0; i < settle.chunks.length; i++) {
+      if (settle.chunks[i].dist > enUzun) enUzun = settle.chunks[i].dist;
+    }
+    if (!enUzun && !settle.hits.length) return 0;
+    return Math.round((enUzun / FALL_STEP) * (1000 / 60)) + 1400;
   }
 
   /* Carpmanin zemine ve gorillere etkisini uygular (iki tarafta da ayni). */
@@ -401,6 +672,10 @@
     W: W, H: H, GW: GW, GH: GH, SUN: SUN, DT: DT, SUB: SUB, BCOL: BCOL,
     CELL: CELL, GCOLS: GCOLS, GROWS: GROWS,
     buildGrid: buildGrid, rebuildGrid: rebuildGrid, applyCrater: applyCrater,
+    pushEdit: pushEdit, forEachCraterCell: forEachCraterCell,
+    applyEdit: applyEdit, spansOf: spansOf, cellsOfSpans: cellsOfSpans,
+    detachedChunks: detachedChunks, settleTerrain: settleTerrain,
+    settleDurationMs: settleDurationMs,
     CLOUD_TOP: CLOUD_TOP, CLOUD_BOTTOM: CLOUD_BOTTOM, CLOUD_CELL: CLOUD_CELL,
     SUPPORT_MIN: SUPPORT_MIN, FATAL_FALL: FATAL_FALL, FALL_STEP: FALL_STEP,
     supportRatio: supportRatio,

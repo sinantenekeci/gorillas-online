@@ -146,8 +146,8 @@ test("kraterleri sırayla işlemek ile baştan kurmak aynı ızgarayı verir", (
   kraterler.forEach((c) => core.applyCrater(gecGelen, c));
   assert.deepStrictEqual(Array.from(gecGelen.grid), Array.from(canli.grid));
 
-  // aynı geçmişten toptan yeniden kurmak da aynı sonucu vermeli
-  const kopya = { buildings: canli.buildings, craters: canli.craters.slice() };
+  // aynı günlükten toptan yeniden kurmak da aynı sonucu vermeli
+  const kopya = { buildings: canli.buildings, edits: canli.edits.slice() };
   core.rebuildGrid(kopya);
   assert.deepStrictEqual(Array.from(kopya.grid), Array.from(canli.grid));
 });
@@ -275,6 +275,114 @@ test("her raunt en az bir bulut üretir", () => {
   for (let seed = 0; seed < 20; seed++) {
     assert.ok(core.createRound(seed, {}).clouds.length >= 3);
   }
+});
+
+/* ---------------- kopan bina parçaları ----------------
+   Krater bir binayı ikiye ayırınca üst parça havada asılı kalıyordu.
+   Aşağıdaki testler kopma tespitini ve kullanıcıyla kararlaştırılan iki
+   kuralı koruyor: parçayla inen goril "2 goril boyu" kuralına tabidir,
+   kafasına parça düşen goril ancak parça 2 goril boyundan yüksekten
+   geldiyse ölür. */
+function kuleSahnesi(gorilY) {
+  return {
+    buildings: [{ x: 400, y: 140, w: 40, h: 260, color: "#A8A8A8", windows: [] }],
+    edits: [], gravity: 9.8, wind: 0, sunHit: false, clouds: [],
+    gorillas: [{ x: 420, y: gorilY, dead: false, team: "red", facing: 1 }]
+  };
+}
+
+test("sağlam şehirde kopmuş parça yoktur", () => {
+  for (let seed = 0; seed < 30; seed++) {
+    const s = core.createRound(seed, { red: 2, blue: 2 });
+    assert.deepStrictEqual(core.detachedChunks(s), [], "tohum " + seed + " yanlış kopma bildirdi");
+  }
+});
+
+test("binayı ortasından kesen krater üst parçayı kopartır", () => {
+  const st = kuleSahnesi(106);
+  core.applyCrater(st, { x: 420, y: 260, r: 24 });
+  assert.strictEqual(core.detachedChunks(st).length, 1, "üst parça kopmuş sayılmalı");
+});
+
+test("kopan parça düşer ve sonrasında havada asılı parça kalmaz", () => {
+  const st = kuleSahnesi(106);
+  core.applyCrater(st, { x: 420, y: 260, r: 24 });
+  const s = core.settleTerrain(st);
+  assert.strictEqual(s.chunks.length, 1);
+  assert.ok(s.chunks[0].dist > 0, "parça aşağı inmeli");
+  assert.ok(s.chunks[0].spans.length > 0, "parça sütun aralıklarıyla bildirilmeli");
+  assert.deepStrictEqual(core.detachedChunks(st), [], "düşüşten sonra asılı parça kalmamalı");
+});
+
+test("parçanın üstündeki goril onunla birlikte iner", () => {
+  const st = kuleSahnesi(106);
+  core.applyCrater(st, { x: 420, y: 260, r: 24 });
+  const s = core.settleTerrain(st);
+  assert.strictEqual(s.falls.length, 1);
+  const f = s.falls[0];
+  assert.strictEqual(f.rider, true, "parçayla inen goril olarak işaretlenmeli");
+  assert.strictEqual(f.dist, s.chunks[0].dist, "goril parçayla aynı mesafeyi inmeli");
+  assert.strictEqual(f.died, false, "kısa düşüş öldürmemeli");
+  assert.strictEqual(st.gorillas[0].y, f.toY);
+});
+
+test("parçayla inen goril iki goril boyundan yüksekten düşerse ölür", () => {
+  const st = kuleSahnesi(106);
+  [200, 240, 280].forEach((y) => core.applyCrater(st, { x: 420, y: y, r: 24 }));
+  const s = core.settleTerrain(st);
+  const binen = s.falls.find((f) => f.rider);
+  assert.ok(binen, "parçayla inen goril bildirilmeli");
+  assert.ok(binen.dist > core.FATAL_FALL, "düşüş ölümcül eşiği aşmalı");
+  assert.strictEqual(binen.died, true);
+  assert.strictEqual(st.gorillas[0].dead, true);
+});
+
+test("iki goril boyundan yüksekten düşen parça altındaki gorili ezer", () => {
+  const st = kuleSahnesi(270);
+  [220, 250, 280].forEach((y) => core.applyCrater(st, { x: 420, y: y, r: 24 }));
+  const s = core.settleTerrain(st);
+  assert.ok(s.chunks.some((c) => c.dist >= core.FATAL_FALL), "yüksekten düşen bir parça olmalı");
+  assert.strictEqual(s.hits.length, 1);
+  assert.strictEqual(s.hits[0].i, 0);
+  assert.strictEqual(s.hits[0].died, true);
+  assert.strictEqual(st.gorillas[0].dead, true);
+});
+
+/* Kısa düşen moloz öldürmez; goril taşın içinde gömülü kalmasın diye
+   molozun üstüne çıkarılır. */
+test("alçaktan düşen parça öldürmez, gorili molozun üstüne çıkarır", () => {
+  const st = kuleSahnesi(270);
+  core.applyCrater(st, { x: 420, y: 280, r: 24 });
+  const s = core.settleTerrain(st);
+  assert.ok(s.chunks[0].dist < core.FATAL_FALL, "bu düşüş ölümcül eşiğin altında olmalı");
+  assert.strictEqual(s.hits.length, 1);
+  assert.strictEqual(s.hits[0].died, false);
+  assert.strictEqual(st.gorillas[0].dead, false);
+  assert.strictEqual(st.gorillas[0].y, s.hits[0].toY);
+  assert.ok(core.solid(st, st.gorillas[0].x, st.gorillas[0].y + core.GH),
+    "goril molozun üstünde sağlam zemine basmalı");
+});
+
+/* Parça hareketi de günlüğe yazılır; odaya sonradan giren günlüğü baştan
+   oynatıp aynı zemine varmalı. Sıra bozulursa zemin ayrışır. */
+test("parça hareketi günlüğe yazılır ve baştan oynatınca aynı zemini verir", () => {
+  const st = kuleSahnesi(106);
+  core.applyCrater(st, { x: 420, y: 260, r: 24 });
+  core.settleTerrain(st);
+  assert.ok(st.edits.some((e) => e.k === "m"), "günlükte parça hareketi olmalı");
+
+  const gecGelen = { buildings: st.buildings, edits: st.edits.slice() };
+  core.rebuildGrid(gecGelen);
+  assert.deepStrictEqual(Array.from(gecGelen.grid), Array.from(st.grid));
+});
+
+test("canlandırma süresi parça düşüşünü de kapsar", () => {
+  const bos = core.settleDurationMs({ chunks: [], falls: [], hits: [] });
+  assert.strictEqual(bos, 0, "hiçbir şey olmadıysa bekleme yok");
+  const uzun = core.settleDurationMs({ chunks: [{ dist: 200 }], falls: [], hits: [] });
+  const kisa = core.settleDurationMs({ chunks: [{ dist: 20 }], falls: [], hits: [] });
+  assert.ok(uzun > kisa, "uzun düşüş daha uzun sürmeli");
+  assert.ok(kisa > 0, "parça düştüyse bekleme olmalı");
 });
 
 /* ---------------- düşme ---------------- */

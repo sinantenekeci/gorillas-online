@@ -518,9 +518,11 @@ test("simülasyon sunucu durumuyla istemci durumunu aynı tutar", () => {
   core.applyImpact(server, shot.impact);
   core.applyImpact(client, shot.impact);
 
-  assert.deepStrictEqual(client.craters, server.craters);
+  assert.deepStrictEqual(client.edits, server.edits);
   assert.strictEqual(
     core.solid(client, shot.impact.x, shot.impact.y),
     core.solid(server, shot.impact.x, shot.impact.y)
   );
+  // zemin yalnizca noktasal degil butun olarak ayni olmali
+  assert.deepStrictEqual(Array.from(client.grid), Array.from(server.grid));
 });
