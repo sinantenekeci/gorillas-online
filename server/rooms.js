@@ -427,6 +427,8 @@ class Hub {
       sunHit: shot.sunHit,
       falls: settle.falls,
       chunks: settle.chunks,
+      topples: settle.topples,
+      events: settle.events,
       hits: settle.hits
     });
 
@@ -445,9 +447,12 @@ class Hub {
     ((settle && settle.falls) || []).forEach((f) => {
       const p = this.playerByGorilla(room, f.i);
       if (!p) return;
-      if (f.rider) this.sys(room, f.died ? "sys.rodeDead" : "sys.rodeSurvived", { name: p.name });
+      if (f.topple) this.sys(room, f.died ? "sys.toppledDead" : "sys.toppledSurvived", { name: p.name });
+      else if (f.slide) this.sys(room, f.died ? "sys.slidDead" : "sys.slidSurvived", { name: p.name });
+      else if (f.rider) this.sys(room, f.died ? "sys.rodeDead" : "sys.rodeSurvived", { name: p.name });
       else this.sys(room, f.died ? "sys.fellDead" : "sys.fellSurvived", { name: p.name });
     });
+    ((settle && settle.topples) || []).forEach(() => this.sys(room, "sys.toppled"));
     ((settle && settle.hits) || []).forEach((h) => {
       const p = this.playerByGorilla(room, h.i);
       if (!p) return;

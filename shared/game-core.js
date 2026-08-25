@@ -268,6 +268,7 @@
   function applyEdit(grid, e) {
     if (e.k === "c") punchGrid(grid, e.x, e.y, e.r);
     else if (e.k === "m") moveSpans(grid, e.spans, e.dy);
+    else if (e.k === "t") replaceSpans(grid, e.from, e.to);
   }
 
   /* Elle kurulan sahnelerde (testler) ızgara olmayabilir; ilk kullanımda
@@ -467,6 +468,16 @@
     return cells;
   }
 
+  /* Devrilen kütle: kaynak hücreler silinir, hedef hücreler doldurulur.
+     Dönüş açısı yalnızca ÇİZİM için taşınır; ızgara hazır hedef listesinden
+     kurulur. Math.cos/sin motorlar arası bit-eşdeğerli olmadığı için iki
+     tarafın açıdan yeniden hesaplaması ızgaraları ayrıştırırdı. */
+  function replaceSpans(grid, from, to) {
+    var a = cellsOfSpans(from), b = cellsOfSpans(to), i;
+    for (i = 0; i < a.length; i++) grid[a[i]] = 0;
+    for (i = 0; i < b.length; i++) if (b[i] >= 0 && b[i] < grid.length) grid[b[i]] = 1;
+  }
+
   function moveSpans(grid, spans, dy) {
     var cells = cellsOfSpans(spans), i, hedef;
     for (i = 0; i < cells.length; i++) grid[cells[i]] = 0;
@@ -533,7 +544,7 @@
 
   /* Parçanın üstünde duran goriller onunla birlikte iner. Ölçü, gorilin
      tabanının ne kadarının bu parçaya bastığı — settleGorillas ile aynı eşik. */
-  function ridersOf(state, chunk) {
+  function ridersOf(state, kume) {
     var out = [], gi, g, lo, hi, x, total, on, cy;
     for (gi = 0; gi < state.gorillas.length; gi++) {
       g = state.gorillas[gi];
@@ -545,7 +556,7 @@
       for (x = lo; x <= hi; x++) {
         if (x < 0 || x >= W) continue;
         total++;
-        if (chunk.set.has(cy * GCOLS + Math.floor(x / CELL))) on++;
+        if (kume.has(cy * GCOLS + Math.floor(x / CELL))) on++;
       }
       if (total && on / total >= SUPPORT_MIN) out.push(gi);
     }
@@ -580,6 +591,199 @@
     return H;
   }
 
+  /* ---------- devrilme ----------
+     Kopma testi "bu parça yere bağlı mı?" diye sorar; devrilme testi
+     "ayakta durabilir mi?" diye sorar. Tabanı bir yandan oyulmuş ama ince bir
+     bacakla hâlâ yere bağlı bir gökdelen, birincisine göre sapasağlamdır —
+     oysa gerçekte devrilmesi gerekir.
+
+     Ölçüt klasik: her yatay kesitte, üstteki kütlenin ağırlık merkezi o
+     kesitteki dayanma yüzeyinin dışına taşıyorsa yapı oradan devrilir.
+     TOPPLE_MARGIN payı sağlam binaların kıl payı tetiklemesini önler;
+     sağlam şehirde ölçülen yanlış bildirim sayısı sıfır. */
+  var TOPPLE_MARGIN = 4;          // hücre; denge payı (büyütmek yıkımı azaltır)
+  var TOPPLE_MIN_MASS = 120;      // hücre; bundan küçük kütle devrilmez
+  var TOPPLE_MIN_LEAN = 2;        // hücre; bu kadar taşmayan kütle sallanıp durur
+  var ROT_STEPS = 30;             // 90 dereceye kadar simülasyon adımı
+  var SETTLE_ROUNDS = 4;          // zincirleme çökmede yineleme sınırı
+  var TOPPLE_TRAVEL = 160;        // tam devrilmenin canlandırma süresi karşılığı (piksel)
+
+  /* Izgaradaki tüm bağlantılı kütleleri döndürür (binalar birbirine değmez,
+     aralarında bir hücrelik boşluk vardır; her bina kendi bileşenidir). */
+  function componentsOf(grid) {
+    var etiket = new Uint8Array(grid.length), out = [], i, j, x, y, yigin, hucre;
+    for (i = 0; i < grid.length; i++) {
+      if (!grid[i] || etiket[i]) continue;
+      yigin = [i]; hucre = []; etiket[i] = 1;
+      while (yigin.length) {
+        j = yigin.pop(); hucre.push(j);
+        x = j % GCOLS; y = (j - x) / GCOLS;
+        if (x > 0 && grid[j - 1] && !etiket[j - 1]) { etiket[j - 1] = 1; yigin.push(j - 1); }
+        if (x < GCOLS - 1 && grid[j + 1] && !etiket[j + 1]) { etiket[j + 1] = 1; yigin.push(j + 1); }
+        if (y > 0 && grid[j - GCOLS] && !etiket[j - GCOLS]) { etiket[j - GCOLS] = 1; yigin.push(j - GCOLS); }
+        if (y < GROWS - 1 && grid[j + GCOLS] && !etiket[j + GCOLS]) { etiket[j + GCOLS] = 1; yigin.push(j + GCOLS); }
+      }
+      out.push(hucre);
+    }
+    return out;
+  }
+
+  /* Bileşende yukarıdan aşağı inerek dengenin bozulduğu ilk kesiti bulur. */
+  function topplePoint(cells) {
+    var satir = new Map(), i, x, y, s;
+    for (i = 0; i < cells.length; i++) {
+      x = cells[i] % GCOLS; y = (cells[i] - x) / GCOLS;
+      s = satir.get(y);
+      if (!s) { s = { min: x, max: x, n: 0, sumX: 0 }; satir.set(y, s); }
+      if (x < s.min) s.min = x;
+      if (x > s.max) s.max = x;
+      s.n++; s.sumX += x;
+    }
+    var satirlar = Array.from(satir.keys()).sort(function (a, b) { return a - b; });
+    var ustN = 0, ustX = 0, k;
+    for (k = 0; k < satirlar.length; k++) {
+      s = satir.get(satirlar[k]);
+      if (ustN >= TOPPLE_MIN_MASS) {
+        var com = ustX / ustN;
+        var tasma = com < s.min ? s.min - com : (com > s.max ? com - s.max : 0);
+        if (tasma > TOPPLE_MARGIN && tasma > TOPPLE_MIN_LEAN) {
+          return { cy: satirlar[k], dir: com < s.min ? -1 : 1, pivotCx: com < s.min ? s.min : s.max };
+        }
+      }
+      ustN += s.n; ustX += s.sumX;
+    }
+    return null;
+  }
+
+  /* Kırılma çizgisinin ÜSTÜNDE kalan hücreler devrilecek kütledir. */
+  function massAbove(cells, cy) {
+    var out = [], i, y;
+    for (i = 0; i < cells.length; i++) {
+      y = (cells[i] - (cells[i] % GCOLS)) / GCOLS;
+      if (y < cy) out.push(cells[i]);
+    }
+    return out;
+  }
+
+  /* Hücre kümesini pivot etrafında döndürür. Ters eşleme kullanılır: hedef
+     hücrenin merkezi geriye döndürülüp kaynakta dolu mu diye bakılır; ileri
+     eşlemede yuvarlama yüzünden şeklin içinde delikler kalıyordu. */
+  function rotateCells(kaynak, pivotX, pivotY, cos, sin) {
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, i, x, y, rx, ry;
+    for (i = 0; i < kaynak.length; i++) {
+      x = (kaynak[i] % GCOLS) * CELL + CELL / 2;
+      y = ((kaynak[i] - (kaynak[i] % GCOLS)) / GCOLS) * CELL + CELL / 2;
+      rx = pivotX + (x - pivotX) * cos - (y - pivotY) * sin;
+      ry = pivotY + (x - pivotX) * sin + (y - pivotY) * cos;
+      if (rx < minX) minX = rx;
+      if (rx > maxX) maxX = rx;
+      if (ry < minY) minY = ry;
+      if (ry > maxY) maxY = ry;
+    }
+    var set = new Set(kaynak);
+    var cx0 = Math.floor(minX / CELL) - 1, cx1 = Math.floor(maxX / CELL) + 1;
+    var cy0 = Math.floor(minY / CELL) - 1, cy1 = Math.floor(maxY / CELL) + 1;
+    var out = [], cx, cy, px, py, sx, sy, scx, scy;
+    for (cy = cy0; cy <= cy1; cy++) {
+      for (cx = cx0; cx <= cx1; cx++) {
+        px = cx * CELL + CELL / 2; py = cy * CELL + CELL / 2;
+        sx = pivotX + (px - pivotX) * cos + (py - pivotY) * sin;    // ters dönüş
+        sy = pivotY - (px - pivotX) * sin + (py - pivotY) * cos;
+        scx = Math.floor(sx / CELL); scy = Math.floor(sy / CELL);
+        if (scx < 0 || scx >= GCOLS || scy < 0 || scy >= GROWS) continue;
+        if (!set.has(scy * GCOLS + scx)) continue;
+        if (cx < 0 || cx >= GCOLS || cy < 0 || cy >= GROWS) return null;   // sahne dışına taştı
+        out.push(cy * GCOLS + cx);
+      }
+    }
+    return out;
+  }
+
+  function cellsHit(grid, cells) {
+    for (var i = 0; i < cells.length; i++) if (grid[cells[i]]) return true;
+    return false;
+  }
+
+  /* Kütle, bir şeye çarpana kadar döner; sonra hâlâ boştaysa aşağı oturur.
+     Izgarayı geçici olarak değiştirip ESKİ HÂLİNE döndürür — kalıcı değişikliği
+     her zaman pushEdit yapar, tek kapı orasıdır. */
+  function toppleMass(grid, kaynak, pivotX, pivotY, dir) {
+    var i;
+    for (i = 0; i < kaynak.length; i++) grid[kaynak[i]] = 0;      // kendisi engel olmasın
+
+    var enIyi = null, enIyiAci = 0, adim;
+    for (adim = 1; adim <= ROT_STEPS; adim++) {
+      var aci = dir * (Math.PI / 2) * (adim / ROT_STEPS);
+      var don = rotateCells(kaynak, pivotX, pivotY, Math.cos(aci), Math.sin(aci));
+      if (!don || cellsHit(grid, don)) break;
+      enIyi = don; enIyiAci = aci;
+    }
+
+    var dy = 0;
+    if (enIyi) {
+      // döndükten sonra boşluktaysa düşsün
+      dy = chunkDrop(grid, { cells: enIyi, set: new Set(enIyi) });
+      if (dy > 0) enIyi = enIyi.map(function (c) { return c + dy * GCOLS; });
+    }
+    for (i = 0; i < kaynak.length; i++) grid[kaynak[i]] = 1;      // ızgarayı geri koy
+    return enIyi ? { cells: enIyi, ang: enIyiAci, dy: dy } : null;
+  }
+
+  /* ---------- eğimde kayma ----------
+     Devrilen bina yatınca üstündeki gorilin altı artık düz değil. Ayağının
+     altındaki eğim 55 dereceyi aşıyorsa goril tutunamaz: aşağı doğru kayar,
+     altına yeterince düz bir platform gelene kadar iner. Toplam düşüş yine
+     "2 goril boyu" kuralına tabidir. */
+  var SLIDE_DEG = 55;
+  var SLIDE_TAN = Math.tan(SLIDE_DEG * Math.PI / 180);
+  var SLIDE_STEP = 4;                 // piksel; kayma adımı
+  var SLIDE_MAX = 240;                // adım sınırı (sonsuz döngü olmasın)
+
+  /* x sütununda, fromY'den aşağıya doğru ilk katı zeminin y'si. */
+  function surfaceAt(state, x, fromY) {
+    var grid = gridOf(state);
+    if (x < 0 || x >= W) return H;
+    var cx = Math.floor(x / CELL);
+    var cy = Math.max(0, Math.floor(fromY / CELL));
+    for (; cy < GROWS; cy++) if (grid[cy * GCOLS + cx]) return cy * CELL;
+    return H;
+  }
+
+  /* Gorilin ayağının altındaki zemin eğimi: sol ve sağ ayak hizasındaki
+     yüzey yüksekliklerinin farkı. */
+  function groundSlope(state, g) {
+    var sol = surfaceAt(state, g.x - GW / 2, g.y);
+    var sag = surfaceAt(state, g.x + GW / 2, g.y);
+    var egim = (sag - sol) / GW;                 // pozitif: sağ taraf daha aşağıda
+    return { tan: egim, dir: egim > 0 ? 1 : -1 };
+  }
+
+  function slideGorillas(state) {
+    var out = [], gi, g, adim, s, yeniY;
+    for (gi = 0; gi < state.gorillas.length; gi++) {
+      g = state.gorillas[gi];
+      if (!g || g.dead) continue;
+      var basX = g.x, basY = g.y;
+      for (adim = 0; adim < SLIDE_MAX; adim++) {
+        s = groundSlope(state, g);
+        if (Math.abs(s.tan) <= SLIDE_TAN) break;          // yeterince düz platform
+        var hedefX = g.x + s.dir * SLIDE_STEP;
+        if (hedefX - GW / 2 < 0 || hedefX + GW / 2 >= W) break;
+        g.x = hedefX;
+        yeniY = surfaceAt(state, g.x, g.y) - GH;
+        g.y = Math.max(g.y, yeniY);                        // kayarken yukarı çıkmaz
+        if (g.y + GH >= H) { g.y = H - GH; break; }
+      }
+      if (g.x === basX && g.y === basY) continue;
+      var dist = g.y - basY;
+      var died = dist > FATAL_FALL;
+      if (died) g.dead = true;
+      out.push({ i: gi, fromX: basX, fromY: basY, toX: g.x, toY: g.y,
+                 dist: dist, died: died, slide: true });
+    }
+    return out;
+  }
+
   /* Kopan parçaları düşürür, gorilleri buna göre taşır.
      Döner: { chunks: [{spans, dy, dist}], falls: [...], hits: [{i, toY, died}] }
 
@@ -587,10 +791,10 @@
        - Parçayla birlikte inen goril, mevcut "2 goril boyu" kuralına tabi.
        - Kafasına parça düşen goril, ancak parça 2 goril boyundan yüksekten
          geldiyse ölür; daha kısa düşüşte molozun üstüne çıkar. */
-  function settleTerrain(state) {
+  function dropChunks(state, moved, falls, hits) {
     var grid = gridOf(state);
     var chunks = detachedChunks(state);
-    var moved = [], falls = [], hits = [], i;
+    var oldu = false, i;
 
     // en alttaki parça önce insin ki üstteki, altındakinin yeni yerini görsün
     chunks.sort(function (a, b) { return chunkBottom(b) - chunkBottom(a); });
@@ -600,17 +804,20 @@
       var dy = chunkDrop(grid, ch);
       if (dy <= 0) continue;                       // kopmuş ama bir yere yaslanmış
       var dist = dy * CELL;
-      var riders = ridersOf(state, ch);
+      var riders = ridersOf(state, ch.set);
+      oldu = true;
 
-      pushEdit(state, { k: "m", spans: ch.spans, dy: dy });
-      moved.push({ spans: ch.spans, dy: dy, dist: dist });
+      var olay = { k: "m", spans: ch.spans, dy: dy, dist: dist };
+      pushEdit(state, olay);
+      moved.push(olay);
 
       riders.forEach(function (gi) {
         var g = state.gorillas[gi];
         var fromY = g.y, died = dist > FATAL_FALL;
         g.y = fromY + dist;
         if (died) g.dead = true;
-        falls.push({ i: gi, fromY: fromY, toY: g.y, dist: dist, died: died, rider: true });
+        falls.push({ i: gi, fromX: g.x, fromY: fromY, toX: g.x, toY: g.y,
+                    dist: dist, died: died, rider: true });
       });
 
       for (var gi = 0; gi < state.gorillas.length; gi++) {
@@ -626,10 +833,120 @@
         }
       }
     }
+    return oldu;
+  }
+
+  /* Dengesini yitiren yapıları devirir. Kütlenin üstündeki goriller onunla
+     birlikte döner; sonrasında eğim kuralı devreye girer. */
+  function toppleUnstable(state, topples, falls) {
+    var grid = gridOf(state);
+    var comps = componentsOf(grid);
+    var oldu = false, i, gi;
+
+    for (i = 0; i < comps.length; i++) {
+      var p = topplePoint(comps[i]);
+      if (!p) continue;
+      var kutle = massAbove(comps[i], p.cy);
+      if (kutle.length < TOPPLE_MIN_MASS) continue;
+
+      var pivotX = p.pivotCx * CELL + CELL / 2;
+      var pivotY = p.cy * CELL;
+      var binenler = ridersOf(state, new Set(kutle));
+      var sonuc = toppleMass(grid, kutle, pivotX, pivotY, p.dir);
+      if (!sonuc) continue;
+
+      var from = spansOf(kutle), to = spansOf(sonuc.cells);
+      var olay = { k: "t", from: from, to: to, px: pivotX, py: pivotY, ang: sonuc.ang,
+                   dy: sonuc.dy, dist: Math.abs(sonuc.ang) / (Math.PI / 2) * TOPPLE_TRAVEL + sonuc.dy * CELL };
+      pushEdit(state, olay);
+      olay.riders = [];
+      oldu = true;
+
+      /* Binen goril kütleyle birlikte döner; ayak noktası aynı dönüşümden
+         geçer. Nereye düşeceğine sonraki oturma ve kayma turu karar verir. */
+      var cos = Math.cos(sonuc.ang), sin = Math.sin(sonuc.ang);
+      var binenKayit = [];
+      for (gi = 0; gi < binenler.length; gi++) {
+        var g = state.gorillas[binenler[gi]];
+        if (!g || g.dead) continue;
+        var eskiX = g.x, eskiY = g.y;
+        var ax = g.x, ay = g.y + GH;
+        var nx = pivotX + (ax - pivotX) * cos - (ay - pivotY) * sin;
+        var ny = pivotY + (ax - pivotX) * sin + (ay - pivotY) * cos + sonuc.dy * CELL;
+        g.x = Math.round(Math.max(GW / 2, Math.min(W - GW / 2, nx)));
+        g.y = Math.round(Math.max(0, Math.min(H - GH, ny - GH)));
+        binenKayit.push({ i: binenler[gi], fromX: eskiX, fromY: eskiY, toX: g.x, toY: g.y });
+        falls.push({ i: binenler[gi], fromX: eskiX, fromY: eskiY, toX: g.x, toY: g.y,
+                     dist: Math.max(0, g.y - eskiY), died: false, rider: true, topple: true });
+      }
+      olay.riders = binenKayit;
+      topples.push(olay);
+    }
+    return oldu;
+  }
+
+  /* Zemini oturtur: kopan parçalar düşer, dengesini yitiren yapılar devrilir,
+     goriller yeni zemine göre düşer ve dik eğimlerde kayar.
+
+     Çökme zincirleme olabilir (inen kütle komşusunun desteğini değiştirir),
+     bu yüzden turlar SETTLE_ROUNDS ile sınırlı bir döngüde tekrarlanır;
+     sınır olmasa tek atış yarım şehri yerle bir edebilirdi.
+
+     Kurallar (kullanıcıyla kararlaştırıldı):
+       - Parçayla inen ya da kayan goril "2 goril boyu" kuralına tabi.
+       - Kafasına parça düşen goril, ancak parça 2 goril boyundan yüksekten
+         geldiyse ölür; daha kısa düşüşte molozun üstüne çıkar.
+       - Ayağının altındaki eğim 55 dereceyi aşan goril, düz bir platform
+         bulana kadar aşağı kayar. */
+  function settleTerrain(state) {
+    var moved = [], topples = [], falls = [], hits = [], tur;
+    /* Olaylar SIRALI uygulanir: ikinci devrilmenin kaynagi, birincinin
+       indigi hucreleri icerebilir. Istemci de ayni sirayla oynatmali, yoksa
+       pikselleri hazir olmayan bir bolgeden keser. Gunlugun bu atista eklenen
+       dilimi tam olarak bu sirayi verir. */
+    var basIndex = editsOf(state).length;
+
+    for (tur = 0; tur < SETTLE_ROUNDS; tur++) {
+      var degisti = dropChunks(state, moved, falls, hits);
+      if (toppleUnstable(state, topples, falls)) degisti = true;
+      if (!degisti) break;
+    }
 
     // parçayla inmeyen ama zemini kaybeden goriller
-    settleGorillas(state).forEach(function (f) { falls.push(f); });
-    return { chunks: moved, falls: falls, hits: hits };
+    settleGorillas(state).forEach(function (f) {
+      f.fromX = state.gorillas[f.i].x; f.toX = state.gorillas[f.i].x;
+      falls.push(f);
+    });
+    // dik eğimde tutunamayanlar kayar
+    slideGorillas(state).forEach(function (f) { falls.push(f); });
+
+    return { chunks: moved, topples: topples, events: editsOf(state).slice(basIndex),
+             falls: mergeFalls(state, falls), hits: hits };
+  }
+
+  /* Bir goril tek atışta birden çok evreden geçebilir: devrilen binayla
+     dönebilir, sonra eğimde kayabilir, sonra boşlukta düşebilir. Bunları tek
+     kayda indiriyoruz ki istemci tek bir canlandırma oynatsın ve
+     "2 goril boyu" kuralı TOPLAM düşüşe uygulansın — evre evre bakılsaydı
+     iki kısa düşüşle uzun bir düşüşten sağ çıkılırdı. */
+  function mergeFalls(state, falls) {
+    var harita = new Map(), out = [], i, f, m;
+    for (i = 0; i < falls.length; i++) {
+      f = falls[i];
+      m = harita.get(f.i);
+      if (!m) { harita.set(f.i, f); out.push(f); continue; }
+      m.toX = f.toX; m.toY = f.toY;
+      m.dist += f.dist;
+      m.slide = m.slide || f.slide;
+      m.rider = m.rider || f.rider;
+      m.topple = m.topple || f.topple;
+    }
+    for (i = 0; i < out.length; i++) {
+      f = out[i];
+      f.died = f.dist > FATAL_FALL;
+      if (f.died && state.gorillas[f.i]) state.gorillas[f.i].dead = true;
+    }
+    return out;
   }
 
   /* Dusme canlandirmasinin suresi; sunucu siradaki turu bundan once acmaz. */
@@ -649,9 +966,11 @@
     for (i = 0; i < settle.falls.length; i++) {
       if (settle.falls[i].dist > enUzun) enUzun = settle.falls[i].dist;
     }
-    for (i = 0; i < settle.chunks.length; i++) {
-      if (settle.chunks[i].dist > enUzun) enUzun = settle.chunks[i].dist;
-    }
+    /* Zemin olaylari istemcide SIRAYLA oynatiliyor (bkz. settleTerrain), o
+       yuzden sureleri toplanir; en uzugunu almak yetmezdi. */
+    var zincir = 0;
+    for (i = 0; i < (settle.events || []).length; i++) zincir += settle.events[i].dist || 0;
+    if (zincir > enUzun) enUzun = zincir;
     if (!enUzun && !settle.hits.length) return 0;
     return Math.round((enUzun / FALL_STEP) * (1000 / 60)) + 1400;
   }
@@ -675,6 +994,9 @@
     pushEdit: pushEdit, forEachCraterCell: forEachCraterCell,
     applyEdit: applyEdit, spansOf: spansOf, cellsOfSpans: cellsOfSpans,
     detachedChunks: detachedChunks, settleTerrain: settleTerrain,
+    componentsOf: componentsOf, topplePoint: topplePoint,
+    groundSlope: groundSlope, surfaceAt: surfaceAt,
+    TOPPLE_MARGIN: TOPPLE_MARGIN, SLIDE_DEG: SLIDE_DEG, SLIDE_TAN: SLIDE_TAN,
     settleDurationMs: settleDurationMs,
     CLOUD_TOP: CLOUD_TOP, CLOUD_BOTTOM: CLOUD_BOTTOM, CLOUD_CELL: CLOUD_CELL,
     SUPPORT_MIN: SUPPORT_MIN, FATAL_FALL: FATAL_FALL, FALL_STEP: FALL_STEP,

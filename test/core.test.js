@@ -441,12 +441,182 @@ test("kayan parçanın eski yeri boşalır, muz oradan geçer", () => {
 });
 
 test("canlandırma süresi parça düşüşünü de kapsar", () => {
-  const bos = core.settleDurationMs({ chunks: [], falls: [], hits: [] });
+  const bos = core.settleDurationMs({ chunks: [], events: [], falls: [], hits: [] });
   assert.strictEqual(bos, 0, "hiçbir şey olmadıysa bekleme yok");
-  const uzun = core.settleDurationMs({ chunks: [{ dist: 200 }], falls: [], hits: [] });
-  const kisa = core.settleDurationMs({ chunks: [{ dist: 20 }], falls: [], hits: [] });
+  const uzun = core.settleDurationMs({ chunks: [], events: [{ dist: 200 }], falls: [], hits: [] });
+  const kisa = core.settleDurationMs({ chunks: [], events: [{ dist: 20 }], falls: [], hits: [] });
   assert.ok(uzun > kisa, "uzun düşüş daha uzun sürmeli");
   assert.ok(kisa > 0, "parça düştüyse bekleme olmalı");
+});
+
+/* Zemin olayları istemcide sırayla oynatıldığı için süreleri TOPLANIR;
+   en uzununu almak, zincirleme çökmede sıra erken açılmasına yol açardı. */
+test("zincirleme çökmede süre olayların toplamıdır", () => {
+  const tek = core.settleDurationMs({ chunks: [], events: [{ dist: 100 }], falls: [], hits: [] });
+  const uc = core.settleDurationMs({ chunks: [], events: [{ dist: 100 }, { dist: 100 }, { dist: 100 }], falls: [], hits: [] });
+  assert.ok(uc > tek, "üç olay tek olaydan uzun sürmeli");
+});
+
+/* ---------------- devrilme ----------------
+   Kopma testi "yere bağlı mı?" diye sorar; devrilme testi "ayakta durabilir
+   mi?" diye sorar. Tabanı bir yandan oyulmuş ama ince bir bacakla hâlâ yere
+   bağlı gökdelen birincisine göre sağlamdır, ikincisine göre devrilmelidir. */
+function oyulmusKule(seed) {
+  const st = core.createRound(seed, { red: 1, blue: 1 });
+  const aday = st.buildings.filter((b) => b.h > 180 && b.w <= 44);
+  if (!aday.length) return null;
+  const b = aday[0];
+  st.gorillas[0].x = Math.round(b.x + b.w / 2);
+  st.gorillas[0].y = b.y - core.GH;
+  st.gorillas[1].x = 900; st.gorillas[1].y = core.H - core.GH;
+  for (const dy of [24, 60, 96]) core.applyCrater(st, { x: b.x + 4, y: core.H - dy, r: 24 });
+  return { st, b };
+}
+
+test("sağlam şehirde hiçbir yapı dengesiz sayılmaz", () => {
+  for (let seed = 0; seed < 60; seed++) {
+    const st = core.createRound(seed, { red: 4, blue: 4 });
+    for (const c of core.componentsOf(st.grid)) {
+      if (c.length < 120) continue;
+      assert.strictEqual(core.topplePoint(c), null,
+        "tohum " + seed + " sapasağlam binayı dengesiz saydı");
+    }
+  }
+});
+
+test("tabanı bir yandan oyulan bina o yöne devrilir", () => {
+  let devrilen = 0, denenen = 0;
+  for (let seed = 0; seed < 40; seed++) {
+    const kur = oyulmusKule(seed);
+    if (!kur) continue;
+    denenen++;
+    const s = core.settleTerrain(kur.st);
+    if (!s.topples.length) continue;
+    devrilen++;
+    const t = s.topples[0];
+    assert.ok(Math.abs(t.ang) > 0, "devrilme açısı sıfırdan büyük olmalı");
+    assert.ok(Math.abs(t.ang) <= Math.PI / 2 + 1e-9, "devrilme 90 dereceyi aşmamalı");
+    assert.ok(t.ang < 0, "soldan oyulan bina sola devrilmeli");
+    assert.ok(t.from.length > 0 && t.to.length > 0, "kaynak ve hedef hücreler bildirilmeli");
+  }
+  assert.ok(denenen >= 10, "yeterince sahne denenmeli");
+  assert.ok(devrilen > 0, "hiçbir bina devrilmedi, ölçüt fazla katı olabilir");
+});
+
+/* Çökme zincirleme olabilir; tur sınırı olmasa tek atış yarım şehri götürürdü.
+   Sınırdan sonra sahne kararlı kalmalı: havada parça ve goril kalmamalı. */
+test("devrilmeden sonra sahne kararlı kalır", () => {
+  for (let seed = 0; seed < 40; seed++) {
+    const kur = oyulmusKule(seed);
+    if (!kur) continue;
+    core.settleTerrain(kur.st);
+    assert.deepStrictEqual(core.detachedChunks(kur.st), [],
+      "tohum " + seed + " sonrası havada parça kaldı");
+    for (let i = 0; i < kur.st.gorillas.length; i++) {
+      const g = kur.st.gorillas[i];
+      if (!g || g.dead || g.y + core.GH >= core.H) continue;
+      assert.ok(core.supportRatio(kur.st, g) >= core.SUPPORT_MIN,
+        "tohum " + seed + " goril " + i + " havada kaldı");
+    }
+  }
+});
+
+test("devrilme günlüğe yazılır ve baştan oynatınca aynı zemini verir", () => {
+  for (let seed = 0; seed < 40; seed++) {
+    const kur = oyulmusKule(seed);
+    if (!kur) continue;
+    const s = core.settleTerrain(kur.st);
+    if (!s.topples.length) continue;
+    assert.ok(kur.st.edits.some((e) => e.k === "t"), "günlükte devrilme olmalı");
+
+    const gecGelen = { buildings: kur.st.buildings, edits: kur.st.edits.slice() };
+    core.rebuildGrid(gecGelen);
+    assert.deepStrictEqual(Array.from(gecGelen.grid), Array.from(kur.st.grid));
+    return;
+  }
+  assert.fail("devrilen bir sahne bulunamadı");
+});
+
+test("devrilen binadaki goril onunla birlikte iner", () => {
+  for (let seed = 0; seed < 40; seed++) {
+    const kur = oyulmusKule(seed);
+    if (!kur) continue;
+    const oncekiX = kur.st.gorillas[0].x, oncekiY = kur.st.gorillas[0].y;
+    const s = core.settleTerrain(kur.st);
+    if (!s.topples.length || !s.topples[0].riders.length) continue;
+
+    const kayit = s.falls.filter((f) => f.i === 0);
+    assert.strictEqual(kayit.length, 1, "goril başına tek kayıt olmalı");
+    assert.strictEqual(kayit[0].topple, true, "kayıt devrilme olarak işaretlenmeli");
+    assert.strictEqual(kayit[0].fromX, oncekiX);
+    assert.strictEqual(kayit[0].fromY, oncekiY);
+    assert.strictEqual(kayit[0].toX, kur.st.gorillas[0].x);
+    assert.strictEqual(kayit[0].toY, kur.st.gorillas[0].y);
+    assert.strictEqual(kayit[0].died, kayit[0].dist > core.FATAL_FALL,
+      "ölüm kararı toplam düşüşe bakmalı");
+    assert.strictEqual(kur.st.gorillas[0].dead, kayit[0].died);
+    return;
+  }
+  assert.fail("binen gorilli bir devrilme bulunamadı");
+});
+
+/* ---------------- dik eğimde kayma ----------------
+   Devrilen bina yatınca üstündeki gorilin altı düz değil. 55 dereceyi aşan
+   eğimde tutunamaz, düz bir platform bulana kadar kayar. */
+function rampa(dusus) {
+  // 8 piksellik basamaklarla inen bir rampa; eğim = dusus / 8
+  const buildings = [];
+  for (let i = 0; i < 24; i++) {
+    const y = 120 + i * dusus;
+    if (y >= core.H) break;
+    buildings.push({ x: 300 + i * 8, y: y, w: 8, h: core.H - y, color: "#A8A8A8", windows: [] });
+  }
+  return {
+    buildings: buildings, edits: [], gravity: 9.8, wind: 0, sunHit: false, clouds: [],
+    gorillas: [{ x: 340, y: 0, dead: false, team: "red", facing: 1 }]
+  };
+}
+
+test("55 dereceden dik eğimde goril kayar", () => {
+  const st = rampa(12);                                   // eğim 1.5 > tan(55)=1.43
+  st.gorillas[0].y = core.surfaceAt(st, 340, 0) - core.GH;
+  const basX = st.gorillas[0].x, basY = st.gorillas[0].y;
+  assert.ok(Math.abs(core.groundSlope(st, st.gorillas[0]).tan) > core.SLIDE_TAN,
+    "test sahnesinin eğimi eşiği aşmalı");
+
+  const s = core.settleTerrain(st);
+  const g = st.gorillas[0];
+  assert.ok(g.x > basX, "goril aşağı eğim yönüne (sağa) kaymalı");
+  assert.ok(g.y > basY, "kayarken aşağı inmeli");
+  const kayit = s.falls.find((f) => f.i === 0);
+  assert.ok(kayit && kayit.slide, "kayma olarak bildirilmeli");
+  assert.strictEqual(kayit.toX, g.x);
+  assert.strictEqual(kayit.toY, g.y);
+});
+
+test("eşiğin altındaki eğimde goril kaymaz", () => {
+  const st = rampa(8);                                    // eğim 1.0 < tan(55)
+  st.gorillas[0].y = core.surfaceAt(st, 340, 0) - core.GH;
+  const basX = st.gorillas[0].x, basY = st.gorillas[0].y;
+  assert.ok(Math.abs(core.groundSlope(st, st.gorillas[0]).tan) < core.SLIDE_TAN,
+    "test sahnesinin eğimi eşiğin altında olmalı");
+
+  const s = core.settleTerrain(st);
+  assert.strictEqual(st.gorillas[0].x, basX, "goril yerinde kalmalı");
+  assert.strictEqual(st.gorillas[0].y, basY);
+  assert.strictEqual(s.falls.length, 0);
+});
+
+test("kayan goril iki goril boyundan fazla inerse ölür", () => {
+  const st = rampa(12);
+  st.gorillas[0].y = core.surfaceAt(st, 340, 0) - core.GH;
+  const basY = st.gorillas[0].y;
+  const s = core.settleTerrain(st);
+  const kayit = s.falls.find((f) => f.i === 0);
+  assert.ok(kayit, "kayma kaydı olmalı");
+  assert.strictEqual(kayit.dist, st.gorillas[0].y - basY);
+  assert.strictEqual(kayit.died, kayit.dist > core.FATAL_FALL);
+  assert.strictEqual(st.gorillas[0].dead, kayit.died);
 });
 
 /* ---------------- düşme ---------------- */

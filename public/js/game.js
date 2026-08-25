@@ -212,6 +212,7 @@
     this.dance = null;
     this.falls = null;          // {list, ...} dusme canlandirmasi
     this.chunks = null;         // kopup dusen bina parcalari
+    this.topples = null;        // devrilen yapilar
     this.hits = null;           // parca altinda kalan goriller
     this.shake = 0; this.shakeT = 0;
     this.lying = {};            // i -> goril yatay duruyor
@@ -253,7 +254,7 @@
     this.turn = typeof msg.turn === "number" ? msg.turn : -1;
     this.arms = this.state.gorillas.map(() => 0);
     this.ban = null; this.boom = null; this.dance = null; this.aim = null;
-    this.falls = null; this.chunks = null; this.hits = null;
+    this.falls = null; this.chunks = null; this.topples = null; this.hits = null;
     this.lying = {}; this.xeyes = {}; this.bubble = {};
     this.drawCity();
   };
@@ -277,7 +278,7 @@
   GameView.prototype.clear = function (text) {
     this.state = null;
     this.ban = null; this.boom = null; this.dance = null; this.aim = null;
-    this.falls = null; this.chunks = null; this.hits = null;
+    this.falls = null; this.chunks = null; this.topples = null; this.hits = null;
     this.lying = {}; this.xeyes = {}; this.bubble = {};
     this.players = [];
     this.idleText = text || "OYUNCULAR BEKLENİYOR";
@@ -315,6 +316,10 @@
     for (const e of (this.state.edits || [])) {
       if (e.k === "c") this.punchCrater(e);
       else if (e.k === "m") this.shiftCityPixels(e.spans, e.dy * core.CELL);
+      else if (e.k === "t") {
+        const cut = this.cutChunk(e.from);
+        if (cut) this.paintTopple({ cut: cut, from: e.from, to: e.to, px: e.px, py: e.py, ang: e.ang, dy: e.dy });
+      }
     }
   };
 
@@ -645,6 +650,15 @@
     for (const k of (this.chunks || [])) {
       if (!k.landed) ctx.drawImage(k.cut.cv, k.cut.x, Math.round(k.y));
     }
+    for (const t of (this.topples || [])) {
+      if (t.landed) continue;
+      ctx.save();
+      ctx.translate(t.px, t.py + Math.round(t.dy * core.CELL * t.p));
+      ctx.rotate(t.ang * t.p);
+      ctx.translate(-t.px, -t.py);
+      ctx.drawImage(t.cut.cv, t.cut.x, t.cut.y);
+      ctx.restore();
+    }
     for (let i = 0; i < this.state.gorillas.length; i++) {
       const g = this.state.gorillas[i];
       if (!g) continue;
@@ -673,7 +687,7 @@
     this.arms[msg.shooter] = facing > 0 ? 2 : 1;
     this.ban = { frames: msg.frames, i: 0, impact: msg.impact, sunHit: msg.sunHit, sunPlayed: false };
     this.pendingFalls = (msg.falls || []).slice();
-    this.pendingChunks = (msg.chunks || []).slice();
+    this.pendingEvents = (msg.events || []).slice();
     this.pendingHits = (msg.hits || []).slice();
     this.onShotDone = done || null;
     this.sound.tone(320, 620, 0.12, "square", 0.05);
@@ -737,29 +751,36 @@
      duser; boylece goril parcanin uzerinde durur gibi gorunur. */
   GameView.prototype.beginFalls = function () {
     const list = (this.pendingFalls || []).filter((f) => this.state.gorillas[f.i]);
-    const parcalar = this.pendingChunks || [];
     this.hits = this.pendingHits || [];
-    this.pendingFalls = null; this.pendingChunks = null; this.pendingHits = null;
+    this.pendingFalls = null; this.pendingHits = null;
 
+    /* Zemin olayları SIRAYLA oynatılır ve pikselleri ancak sırası gelince
+       kesilir. Hepsi baştan kesilseydi, ikinci devrilmenin kaynağı birincinin
+       indiği yeri içerdiğinde o bölge daha şehir tuvaline basılmamış olurdu;
+       ölçülen sonuç: tuval ile ızgara 126 hücre ayrışıyordu. */
+    this.terrainQueue = (this.pendingEvents || []).slice();
+    this.pendingEvents = null;
     this.chunks = [];
-    for (const k of parcalar) {
-      const cut = this.cutChunk(k.spans);
-      if (!cut) continue;
-      this.chunks.push({
-        cut: cut, spans: k.spans, dy: k.dy, dist: k.dist,
-        y: cut.y, toY: cut.y + k.dist, landed: false
-      });
-    }
+    this.topples = [];
+    this.startTerrainEvent();
 
-    if (!list.length && !this.chunks.length) {
+    if (!list.length && !this.chunks.length && !this.topples.length) {
       this.applyHits();
       this.finishShot();
       return;
     }
+    /* Goril devrilen binayla dönebilir ya da eğimde yana kayabilir; bu yüzden
+       canlandırma x ekseninde de ilerliyor. */
     this.falls = list.map((f) => ({
-      i: f.i, toY: f.toY, died: f.died, y: f.fromY, phase: "drop", t: 0
+      i: f.i, toY: f.toY, died: f.died, y: f.fromY, phase: "drop", t: 0,
+      fromX: (typeof f.fromX === "number") ? f.fromX : this.state.gorillas[f.i].x,
+      toX: (typeof f.toX === "number") ? f.toX : this.state.gorillas[f.i].x,
+      span: Math.max(1, f.toY - f.fromY)
     }));
-    this.falls.forEach((f) => { this.state.gorillas[f.i].y = f.y; });
+    this.falls.forEach((f) => {
+      this.state.gorillas[f.i].y = f.y;
+      this.state.gorillas[f.i].x = f.fromX;
+    });
   };
 
   /* Parça yere oturunca: pikselleri şehre kalıcı olarak bas, zemin günlüğüne
@@ -770,6 +791,107 @@
     core.pushEdit(this.state, { k: "m", spans: k.spans, dy: k.dy });
     this.startShake(Math.min(1, k.dist / 90));
     this.sound.thud();
+  };
+
+  /* Kuyruktaki sıradaki zemin olayını başlatır: pikselleri O AN keser.
+     Boş dönerse tüm zincir bitmiştir. */
+  GameView.prototype.startTerrainEvent = function () {
+    this.chunks = []; this.topples = [];
+    while (this.terrainQueue && this.terrainQueue.length) {
+      const e = this.terrainQueue.shift();
+      if (e.k === "m") {
+        const cut = this.cutChunk(e.spans);
+        if (!cut) continue;
+        this.chunks.push({
+          cut: cut, spans: e.spans, dy: e.dy, dist: e.dist,
+          y: cut.y, toY: cut.y + e.dist, landed: false
+        });
+        return true;
+      }
+      if (e.k === "t") {
+        const cut = this.cutChunk(e.from);
+        if (!cut) continue;
+        this.topples.push({
+          cut: cut, from: e.from, to: e.to, px: e.px, py: e.py,
+          ang: e.ang, dy: e.dy, dist: e.dist, p: 0, landed: false
+        });
+        return true;
+      }
+    }
+    return false;
+  };
+
+  /* Parçanın en çok kullanılan opak rengi: devrilen yapının gövde rengi.
+     Pencereler azınlıkta kaldığı için bu, binanın duvar rengini verir. */
+  function dominantColor(cv) {
+    const d = cv.getContext("2d").getImageData(0, 0, cv.width, cv.height).data;
+    const sayac = new Map();
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i + 3] < 128) continue;
+      const k = (d[i] << 16) | (d[i + 1] << 8) | d[i + 2];
+      sayac.set(k, (sayac.get(k) || 0) + 1);
+    }
+    let enCok = 0, renk = 0;
+    sayac.forEach((n, k) => { if (n > enCok) { enCok = n; renk = k; } });
+    return "#" + renk.toString(16).padStart(6, "0");
+  }
+
+  /* Devrilen yapı yere yaslanınca: dönmüş görüntüyü şehre bas, ama SUNUCUNUN
+     bildirdiği hedef hücrelere kırp. Dönmüş bitmap ile hücre ızgarası kenarda
+     bir piksel ayrışabilir; maske olmazsa o fark "havada duran goril" ya da
+     "boşlukta patlayan muz" olarak geri döner. */
+  GameView.prototype.landTopple = function (t) {
+    t.landed = true;
+    this.paintTopple(t);
+    core.pushEdit(this.state, { k: "t", from: t.from, to: t.to, px: t.px, py: t.py, ang: t.ang, dy: t.dy });
+    this.startShake(1);
+    this.sound.thud();
+  };
+
+  /* Devrilmiş yapıyı şehir tuvaline basar. Hem iniş anında hem de odaya
+     sonradan girenin günlüğü baştan oynatmasında kullanılır — iki yol aynı
+     pikselleri üretmezse geç gelen başkalarının görmediği bir şehir görür. */
+  GameView.prototype.paintTopple = function (t) {
+    const CELL = core.CELL;
+    const c = this.cctx;
+    const boya = document.createElement("canvas");
+    boya.width = W; boya.height = H;
+    const bc = boya.getContext("2d");
+    bc.imageSmoothingEnabled = false;
+    bc.translate(t.px, t.py);
+    bc.rotate(t.ang);
+    bc.translate(-t.px, -t.py);
+    bc.drawImage(t.cut.cv, t.cut.x, t.cut.y);
+    bc.setTransform(1, 0, 0, 1, 0, 0);
+    if (t.dy) {                                   // dönüşten sonraki oturma
+      const kaydir = document.createElement("canvas");
+      kaydir.width = W; kaydir.height = H;
+      const kc = kaydir.getContext("2d");
+      kc.imageSmoothingEnabled = false;
+      kc.drawImage(boya, 0, t.dy * CELL);
+      bc.clearRect(0, 0, W, H);
+      bc.drawImage(kaydir, 0, 0);
+    }
+    /* Izgara hedef hücreleri TERS eşlemeyle doldurur (deliksiz), tuval ise
+       bitmap'i ileri döndürür — döndürülen bitmapte tek tek boş pikseller
+       kalabiliyor. O boşluklar "tuvalde yok, ızgarada var" farkı yaratıp
+       görünmez zemine dönüşüyordu. Kalan boşlukları hedef hücrelerin altına
+       gövde rengiyle dolduruyoruz. */
+    const govde = dominantColor(t.cut.cv);
+    bc.globalCompositeOperation = "destination-over";
+    bc.fillStyle = govde;
+    bc.beginPath();
+    for (const s of t.to) bc.rect(s[0] * CELL, s[1] * CELL, CELL, (s[2] - s[1] + 1) * CELL);
+    bc.fill();
+
+    // hedef hücrelere kırp (tek yol, tek fill — döngüye çevirmeyin)
+    bc.globalCompositeOperation = "destination-in";
+    bc.fillStyle = "#000";
+    bc.beginPath();
+    for (const s of t.to) bc.rect(s[0] * CELL, s[1] * CELL, CELL, (s[2] - s[1] + 1) * CELL);
+    bc.fill();
+
+    c.drawImage(boya, 0, 0);
   };
 
   /* Kafasına parça düşen goriller: sunucu kimin öldüğünü, kimin molozun
@@ -796,6 +918,14 @@
       k.y += core.FALL_STEP * dtFrames;
       if (k.y >= k.toY) { k.y = k.toY; this.landChunk(k); }
     }
+    for (const t of (this.topples || [])) {
+      if (t.landed) continue;
+      calisan++;
+      t.p += (core.FALL_STEP / Math.max(1, t.dist)) * dtFrames;
+      if (t.p >= 1) { t.p = 1; this.landTopple(t); }
+    }
+    // siradaki zemin olayi ancak bu bitince baslar
+    if (!calisan && this.terrainQueue && this.terrainQueue.length && this.startTerrainEvent()) calisan++;
     for (const f of this.falls || []) {
       const g = this.state.gorillas[f.i];
       if (f.phase === "drop") {
@@ -803,12 +933,15 @@
         f.y += core.FALL_STEP * dtFrames;
         if (f.y >= f.toY) {
           f.y = f.toY;
+          g.x = f.toX;
           f.phase = "land"; f.t = 0;
           this.lying[f.i] = true;
           this.bubble[f.i] = true;
           this.sound.tone(180, 70, 0.18, "square", 0.07);
         }
         g.y = Math.round(f.y);
+        // yatay yol dikey yolla orantılı ilerler: kayma ve dönme birlikte görünür
+        g.x = Math.round(f.fromX + (f.toX - f.fromX) * Math.min(1, (f.y - (f.toY - f.span)) / f.span));
       } else if (f.phase === "land") {
         calisan++;
         f.t += dtFrames;
@@ -827,6 +960,8 @@
     if (!calisan) {
       this.falls = null;
       this.chunks = null;
+      this.topples = null;
+      this.terrainQueue = null;
       this.applyHits();
       this.finishShot();
     }
