@@ -109,15 +109,18 @@ wss.on("connection", (ws, req) => {
   }
   perIp.set(ip, used + 1);
 
-  const id = crypto.randomUUID();
-  const client = {
-    id: id,
+  /* Kalıcı oyuncu jetonu bağlantı adresinden gelir; el sıkışma mesajı
+     beklemeden addClient'a verilebilsin diye böyle. Kopan oyuncu geri
+     döndüğünde sunucu onu bu jetonla eski koltuğuna oturtur. */
+  const client = hub.addClient({
+    id: crypto.randomUUID(),
     name: "Goril",
     stamps: [],
     alive: true,
     send(msg) { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg)); }
-  };
-  hub.addClient(client);
+  }, tokenOf(req));
+  client.alive = true;
+  client._ws = ws;
 
   ws.on("message", (data, isBinary) => {
     if (isBinary || data.length > MAX_MSG_BYTES) return;
@@ -129,13 +132,14 @@ wss.on("connection", (ws, req) => {
     let msg;
     try { msg = JSON.parse(data.toString("utf8")); } catch (e) { return; }
     if (!msg || typeof msg !== "object") return;
-    try { hub.handle(id, msg); } catch (e) { console.error("handle hatasi:", e); }
+    try { hub.handle(client.id, msg); } catch (e) { console.error("handle hatasi:", e); }
   });
 
   ws.on("pong", () => { client.alive = true; });
 
   ws.on("close", () => {
-    hub.removeClient(id);
+    // aynı jetonla yeni bir bağlantı geldiyse eski soketin kapanışı koltuğu düşürmesin
+    if (client._ws === ws) hub.removeClient(client.id);
     const left = (perIp.get(ip) || 1) - 1;
     if (left <= 0) perIp.delete(ip); else perIp.set(ip, left);
   });
@@ -144,6 +148,14 @@ wss.on("connection", (ws, req) => {
 
   ws._client = client;
 });
+
+/* Jeton yalnızca kimlik eşlemek için kullanılır, yetki taşımaz; yine de
+   uzunluğu ve alfabesi sınırlandırılır. */
+function tokenOf(req) {
+  const q = String(req.url || "").split("?")[1] || "";
+  const m = /(?:^|&)t=([A-Za-z0-9_-]{8,64})(?:&|$)/.exec(q);
+  return m ? m[1] : null;
+}
 
 /* Sessizce kopan bağlantılar odada hayalet oyuncu bırakmasın. */
 const heartbeat = setInterval(() => {

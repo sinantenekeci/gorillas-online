@@ -20,6 +20,10 @@ const LOBBY_DEBOUNCE_MS = 200;
 const MAX_ROOMS = 200;
 const TEAM_MAX = 4;                 // sahada takım başına en fazla oyuncu
 const TEAMS = ["red", "blue"];
+/* Kopan oyuncunun koltugu bu sure boyunca tutulur; ayrica icinde bulunulan
+   raunt bitene kadar beklenir. Ikisinden hangisi uzunsa o gecerli. */
+const ABSENT_GRACE_MS = 90000;
+const ABSENT_SKIP_MS = 8000;      // yok olan oyuncunun sirasi bu kadar sonra atlanir
 
 const DEFAULTS = {
   rounds: 3,
@@ -92,16 +96,36 @@ class Hub {
   /* Bekleyen tüm zamanlayıcıları söker; kapanışta ve testlerde çağrılır. */
   destroy() {
     if (this._lobbyTimer) { this.clearTimeout(this._lobbyTimer); this._lobbyTimer = null; }
-    for (const room of this.rooms.values()) this.stopTimer(room);
+    for (const room of this.rooms.values()) {
+      this.stopTimer(room);
+      if (room.absentTimer) { this.clearTimeout(room.absentTimer); room.absentTimer = null; }
+    }
     this.rooms.clear();
     this.clients.clear();
   }
 
-  /* ---------- istemci yaşam döngüsü ---------- */
-  addClient(client) {
+  /* ---------- istemci yaşam döngüsü ----------
+     Telefonun ekranı kilitlenince tarayıcı arka plana düşüyor ve yoklamaya
+     cevap veremiyor; sunucu 25 saniyede soketi kapatıyor. Eskiden bu, oyuncunun
+     ANINDA elenmesi demekti: gorili ölüyor, takımı boşalıyor, kalan rauntlar
+     da boş geçtiği için rakip atış yapmadan maçı kazanıyordu.
+
+     Artık kopan oyuncu odadan silinmiyor, "yok" (absent) işaretleniyor:
+     koltuğu ve gorili duruyor, sırası ABSENT_SKIP_MS sonra atlanıyor. Geri
+     dönerse aynı koltuğa oturuyor. Bunun için kimliğin bağlantıdan bağımsız
+     olması gerekiyor — istemci `hello` ile kalıcı bir jeton yolluyor ve
+     dönen bağlantı ESKİ client nesnesini devralıyor; böylece room.members ve
+     match.players içindeki tüm başvurular geçerli kalıyor. */
+  addClient(client, token) {
+    const eski = token ? this.findAbsent(token) : null;
+    if (eski) return this.resumeClient(eski, client);
+
     client.name = clean(client.name, MAX_NAME) || "Goril";
+    client.token = token || null;
     client.roomId = null;
     client.team = null;
+    client.absent = false;
+    client.absentSince = 0;
     client.chatStamps = [];
     client.lastAim = 0;
     this.clients.set(client.id, client);
@@ -110,11 +134,85 @@ class Hub {
     return client;
   }
 
+  /* Yalnızca "yok" durumundaki koltuk devralınabilir. Aynı jetonla ikinci bir
+     sekme açılırsa oturan oyuncunun koltuğunu çalmasın diye şart bu. */
+  findAbsent(token) {
+    for (const c of this.clients.values()) {
+      if (c.absent && c.token === token) return c;
+    }
+    return null;
+  }
+
+  resumeClient(eski, yeni) {
+    eski.send = yeni.send;
+    eski.absent = false;
+    eski.absentSince = 0;
+    eski.chatStamps = [];
+    eski.lastAim = 0;
+    this.send(eski, { t: "welcome", id: eski.id, name: eski.name });
+
+    const room = this.rooms.get(eski.roomId);
+    if (!room) { eski.roomId = null; this.sendRoomList(eski); return eski; }
+    this.send(eski, { t: "joined", roomId: room.id, name: eski.name });
+    this.sys(room, "sys.returned", { name: eski.name });
+    this.pushRoomState(room);
+    this.broadcastRoomList();
+    return eski;
+  }
+
+  /* Maçta koltuğu olan oyuncu kopunca elenmez, "yok" işaretlenir. */
   removeClient(id) {
     const c = this.clients.get(id);
     if (!c) return;
+    const room = c.roomId ? this.rooms.get(c.roomId) : null;
+    if (room && room.match && c.team && c.token) {
+      c.absent = true;
+      c.absentSince = this.now();
+      c.send = () => {};
+      this.sys(room, "sys.away", { name: c.name });
+      this.pushRoomState(room);
+      this.scheduleAbsentSweep(room);
+      if (room.match.turn >= 0) this.armTurn(room, true);   // sırası ondaysa kısa kes
+      return;
+    }
     if (c.roomId) this.leaveRoom(c, true);
     this.clients.delete(id);
+  }
+
+  /* Koltuğu tutma süresi: raunt bitene KADAR, ama en az ABSENT_GRACE_MS.
+     Yalnız "raunt bitene kadar" deseydik 1v1'de yok olan oyuncu 15-20 saniyede
+     vurulup elenirdi; yalnız süre deseydik raunt ortasında koltuk boşalırdı. */
+  absentExpired(client) {
+    return client.absent && this.now() - client.absentSince >= ABSENT_GRACE_MS;
+  }
+
+  scheduleAbsentSweep(room) {
+    if (room.absentTimer) this.clearTimeout(room.absentTimer);
+    room.absentTimer = this.setTimeout(() => {
+      room.absentTimer = null;
+      this.sweepAbsent(room);
+    }, this.wait(ABSENT_GRACE_MS + 200));
+  }
+
+  /* Süresi dolan yokları eler. Maç sürerken raunt bitmesini bekler; maç yoksa
+     (ya da bitmişse) doğrudan çıkarır. */
+  sweepAbsent(room, roundEnded) {
+    if (!this.rooms.has(room.id)) return;
+    const gidecek = room.members.filter((m) =>
+      this.absentExpired(m) && (roundEnded || !room.match));
+    gidecek.forEach((m) => {
+      this.clients.delete(m.id);
+      this.leaveRoom(m, true);
+    });
+    if (room.members.length && room.members.every((m) => m.absent)) {
+      this.stopTimer(room);
+      if (room.absentTimer) { this.clearTimeout(room.absentTimer); room.absentTimer = null; }
+      room.members.forEach((m) => this.clients.delete(m.id));
+      this.rooms.delete(room.id);
+      this.broadcastRoomList();
+      return;
+    }
+    if (room.members.some((m) => m.absent)) this.scheduleAbsentSweep(room);
   }
 
   send(client, msg) {
@@ -174,6 +272,7 @@ class Hub {
       match: null,
       starting: false,
       timer: null,
+      absentTimer: null,
       createdAt: this.now()
     };
     this.rooms.set(room.id, room);
@@ -377,22 +476,33 @@ class Hub {
     }
   }
 
-  armTurn(room) {
+  /* Sirasi gelen oyuncu "yok" ise tur suresi dolmasin diye kisa kesilir;
+     yoksa sahadaki oyuncu bos yere 30 saniye bekler. */
+  armTurn(room, yeniden) {
     const m = room.match;
-    m.turnEndsAt = this.now() + room.settings.turnSeconds * 1000;
-    this.broadcast(room, {
-      t: "turn",
-      turn: m.turn,
-      seconds: room.settings.turnSeconds,
-      turnEndsAt: m.turnEndsAt
-    });
+    if (!m || m.turn < 0) return;
+    const p = this.playerByGorilla(room, m.turn);
+    const oyuncu = p ? this.clients.get(p.id) : null;
+    const yok = !!(oyuncu && oyuncu.absent);
+    const ms = yok ? ABSENT_SKIP_MS : room.settings.turnSeconds * 1000;
+
+    m.turnEndsAt = this.now() + ms;
+    if (!yeniden) {
+      this.broadcast(room, {
+        t: "turn",
+        turn: m.turn,
+        seconds: Math.round(ms / 1000),
+        turnEndsAt: m.turnEndsAt
+      });
+    }
     this.stopTimer(room);
     room.timer = this.setTimeout(() => {
       if (!room.match || room.match.phase !== "aim") return;
-      const p = this.playerByGorilla(room, room.match.turn);
-      this.sys(room, "sys.timeout", { name: p ? p.name : "?" });
+      const q = this.playerByGorilla(room, room.match.turn);
+      const c = q ? this.clients.get(q.id) : null;
+      this.sys(room, (c && c.absent) ? "sys.awaySkipped" : "sys.timeout", { name: q ? q.name : "?" });
       this.nextTurn(room);
-    }, this.wait(room.settings.turnSeconds * 1000));
+    }, this.wait(ms));
   }
 
   fire(client, msg) {
@@ -480,6 +590,8 @@ class Hub {
     else this.sys(room, "sys.roundDraw");
 
     this.stopTimer(room);
+    // raunt bitti: suresi dolan "yok" oyuncular artik elenebilir
+    this.sweepAbsent(room, true);
     room.timer = this.setTimeout(() => {
       if (!room.match) return;
       if (m.round >= m.totalRounds) this.endMatch(room);
@@ -553,7 +665,7 @@ class Hub {
       hostId: room.hostId,
       teamMax: TEAM_MAX,
       settings: room.settings,
-      members: room.members.map((c) => ({ id: c.id, name: c.name, team: c.team })),
+      members: room.members.map((c) => ({ id: c.id, name: c.name, team: c.team, absent: !!c.absent })),
       match: (m && m.state) ? {
         round: m.round,
         totalRounds: m.totalRounds,
@@ -620,7 +732,8 @@ class Hub {
     client.name = room ? this.uniqueName(room, name) : name;
     this.send(client, { t: "welcome", id: client.id, name: client.name });
     if (room) {
-      this.sys(room, "sys.renamed", { old: old, name: client.name });
+      // yeniden baglanmada ayni ad geliyor; degismediyse duyurmaya gerek yok
+      if (old !== client.name) this.sys(room, "sys.renamed", { old: old, name: client.name });
       this.pushRoomState(room);
     }
   }

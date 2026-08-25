@@ -407,10 +407,14 @@ test("takımda yaşayan varken raunt bitmez, sıra takım arkadaşına geçer", 
   assert.strictEqual(a.last("roundEnd"), null, "mavi takımda hâlâ yaşayan var, raunt bitmemeli");
 });
 
-test("maç ortasında kopan oyuncunun gorili ölür", async () => {
+/* Jetonu olmayan istemci geri dönemez, o yüzden koltuğu tutmanın anlamı yok:
+   eski davranış (anında eleme) burada geçerli kalır. Jetonlu istemcinin
+   koltuğunun tutulduğu ayrı testlerde doğrulanıyor. */
+test("jetonsuz istemci maç ortasında koparsa gorili ölür", async () => {
   const hub = mkHub(100);
   const { a, b, id, basladi } = await kurVeBaslat(hub, { rounds: 1 });
   assert.ok(basladi);
+  assert.strictEqual(b.token, null, "bu test jetonsuz istemci varsayıyor");
 
   hub.removeClient(b.id);
   assert.ok(a.last("roundEnd"), "mavi takım tükendiği için raunt bitmeli");
@@ -525,4 +529,121 @@ test("simülasyon sunucu durumuyla istemci durumunu aynı tutar", () => {
   );
   // zemin yalnizca noktasal degil butun olarak ayni olmali
   assert.deepStrictEqual(Array.from(client.grid), Array.from(server.grid));
+});
+
+/* ---------------- kopan bağlantı ve geri dönüş ----------------
+   Telefonun ekranı kilitlenince tarayıcı arka plana düşüyor ve sunucu 25
+   saniyede soketi kapatıyor. Eskiden bu ANINDA eleme demekti: goril ölüyor,
+   takım boşalıyor, kalan rauntlar da boş geçtiği için rakip atış yapmadan
+   maçı kazanıyordu. Aşağıdaki testler yeni davranışı koruyor. */
+function mkClientToken(hub, name, token) {
+  const c = {
+    id: "c" + (++seq),
+    name: name,
+    inbox: [],
+    send(m) { c.inbox.push(m); },
+    last(type) { for (let i = c.inbox.length - 1; i >= 0; i--) if (c.inbox[i].t === type) return c.inbox[i]; return null; },
+    all(type) { return c.inbox.filter((m) => m.t === type); },
+    clear() { c.inbox.length = 0; }
+  };
+  return hub.addClient(c, token);
+}
+
+test("maçta kopan oyuncu anında elenmez, koltuğu tutulur", async () => {
+  const hub = mkHub();
+  const a = mkClient(hub, "Kalan");
+  hub.handle(a.id, { t: "create", name: "Kopma", settings: { turnSeconds: 120, rounds: 3 } });
+  const id = a.last("joined").roomId;
+  const b = mkClientToken(hub, "Kopan", "jeton-kopan-1");
+  hub.handle(b.id, { t: "join", roomId: id });
+  hub.handle(a.id, { t: "start" });
+  assert.ok(await until(() => a.last("round"), 3000), "maç başlamalı");
+
+  const room = hub.rooms.get(id);
+  const gorilIndeksi = room.match.players.find((p) => p.id === b.id).gorilla;
+
+  hub.removeClient(b.id);                       // soket kapandı
+
+  assert.ok(room.members.some((m) => m.id === b.id), "oyuncu odadan silinmemeli");
+  assert.strictEqual(room.members.find((m) => m.id === b.id).absent, true, "yok işaretlenmeli");
+  assert.strictEqual(room.match.state.gorillas[gorilIndeksi].dead, false, "gorili ölmemeli");
+  assert.ok(room.match, "maç sürmeli");
+
+  const durum = a.last("roomState");
+  assert.ok(durum.members.some((m) => m.id === b.id && m.absent), "oda durumu AFK bildirmeli");
+});
+
+test("kopan oyuncunun sırası kısa sürede atlanır, maç devam eder", async () => {
+  const hub = mkHub();
+  const a = mkClient(hub, "Kalan");
+  hub.handle(a.id, { t: "create", name: "Kopma2", settings: { turnSeconds: 120, rounds: 3 } });
+  const id = a.last("joined").roomId;
+  const b = mkClientToken(hub, "Kopan", "jeton-kopan-2");
+  hub.handle(b.id, { t: "join", roomId: id });
+  hub.handle(a.id, { t: "start" });
+  assert.ok(await until(() => a.last("round"), 3000));
+
+  const room = hub.rooms.get(id);
+  const kopanGoril = room.match.players.find((p) => p.id === b.id).gorilla;
+  // sırayı kopan oyuncuya getir
+  room.match.turn = kopanGoril;
+  hub.removeClient(b.id);
+
+  // tur süresi 120 saniye ama yok olan oyuncu 8 saniyede atlanmalı
+  assert.ok(await until(() => room.match && room.match.turn !== kopanGoril, 3000),
+    "sıra kısa sürede geçmeli");
+  assert.ok(room.match, "maç bitmemeli");
+  assert.strictEqual(room.match.state.gorillas[kopanGoril].dead, false, "goril hâlâ yaşamalı");
+});
+
+test("aynı jetonla dönen oyuncu eski koltuğuna ve goriline kavuşur", async () => {
+  const hub = mkHub();
+  const a = mkClient(hub, "Kalan");
+  hub.handle(a.id, { t: "create", name: "Donus", settings: { turnSeconds: 120, rounds: 3 } });
+  const id = a.last("joined").roomId;
+  const b = mkClientToken(hub, "Kopan", "jeton-donus");
+  hub.handle(b.id, { t: "join", roomId: id });
+  const eskiTakim = b.team;
+  hub.handle(a.id, { t: "start" });
+  assert.ok(await until(() => a.last("round"), 3000));
+  const room = hub.rooms.get(id);
+  const gorilIndeksi = room.match.players.find((p) => p.id === b.id).gorilla;
+
+  hub.removeClient(b.id);
+  const geri = mkClientToken(hub, "Kopan", "jeton-donus");
+
+  assert.strictEqual(geri.id, b.id, "kimlik korunmalı, yoksa gorille bağı kopar");
+  assert.strictEqual(geri.absent, false, "geri dönen yok sayılmamalı");
+  assert.strictEqual(geri.team, eskiTakim, "eski takımına dönmeli");
+  assert.strictEqual(geri.roomId, id, "eski odasına dönmeli");
+  assert.ok(geri.last("joined"), "odaya girdiği bildirilmeli");
+  assert.strictEqual(room.match.players.find((p) => p.id === geri.id).gorilla, gorilIndeksi,
+    "aynı gorili sürmeli");
+});
+
+/* Aynı jetonla ikinci sekme açan, oturan oyuncunun koltuğunu çalmamalı. */
+test("koltuk sahibi bağlıyken aynı jeton koltuğu çalamaz", async () => {
+  const hub = mkHub();
+  const a = mkClient(hub, "Kalan");
+  hub.handle(a.id, { t: "create", name: "Sekme", settings: { turnSeconds: 120 } });
+  const id = a.last("joined").roomId;
+  const b = mkClientToken(hub, "Sahip", "jeton-sekme");
+  hub.handle(b.id, { t: "join", roomId: id });
+
+  const ikinci = mkClientToken(hub, "Sahip", "jeton-sekme");
+  assert.notStrictEqual(ikinci.id, b.id, "ikinci sekme yeni oyuncu olmalı");
+  assert.strictEqual(b.roomId, id, "ilk bağlantı odada kalmalı");
+});
+
+/* Maç yokken kopan oyuncu için tutulacak koltuk da yok; eskisi gibi çıkar. */
+test("maç yokken kopan oyuncu odadan çıkar", async () => {
+  const hub = mkHub();
+  const a = mkClient(hub, "Kalan");
+  hub.handle(a.id, { t: "create", name: "Lobi", settings: { turnSeconds: 120 } });
+  const id = a.last("joined").roomId;
+  const b = mkClientToken(hub, "Giden", "jeton-lobi");
+  hub.handle(b.id, { t: "join", roomId: id });
+
+  hub.removeClient(b.id);
+  assert.ok(!hub.rooms.get(id).members.some((m) => m.id === b.id), "odadan çıkmalı");
 });

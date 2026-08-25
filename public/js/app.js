@@ -168,17 +168,27 @@
     setControls(false);
   });
 
+  /* Bağlantı geri gelince sunucu bizi kalıcı jetonla eski koltuğumuza
+     oturtuyor olabilir; bu durumda kendiliğinden "joined" gelir. Hemen
+     "join" yollarsak "zaten bir odadasın" hatası alırız, o yüzden kısa bir
+     süre bekleyip yalnızca sunucu bizi geri koymadıysa katılmayı deniyoruz. */
+  let rejoinTimer = 0;
   net.on("open", () => {
     if (me.name) net.send({ t: "rename", name: me.name });
     if (room) return;
     const code = hashRoom();
     if (!code) return;
-    if (lastJoin && lastJoin.roomId === code) {
-      pendingJoin = { roomId: code };
-      net.send({ t: "join", roomId: code, password: lastJoin.password });
-    } else {
-      tryJoin(code);
-    }
+    clearTimeout(rejoinTimer);
+    rejoinTimer = setTimeout(() => {
+      rejoinTimer = 0;
+      if (room) return;                       // sunucu koltuğu geri verdi
+      if (lastJoin && lastJoin.roomId === code) {
+        pendingJoin = { roomId: code };
+        net.send({ t: "join", roomId: code, password: lastJoin.password });
+      } else {
+        tryJoin(code);
+      }
+    }, 500);
   });
 
   net.on("welcome", (m) => {
@@ -404,6 +414,10 @@
     const mine = m.members.find((x) => x.id === me.id);
     myTeam = mine ? mine.team : null;
     myGorilla = m.match ? gorillaOf(m.match.players, me.id) : -1;
+    // baglantisi kopan oyuncularin gorillerine AFK etiketi
+    view.setAway(m.match
+      ? m.members.filter((x) => x.absent).map((x) => gorillaOf(m.match.players, x.id)).filter((g) => g >= 0)
+      : []);
 
     if (m.match && !view.state) {
       view.setRound({
@@ -487,11 +501,13 @@
       const gi = room.match ? gorillaOf(room.match.players, m.id) : -1;
       const dead = room.match && gi >= 0 && room.match.dead && room.match.dead[gi];
       const cls = "roster__item" + (team ? " is-" + team : "") +
-        (gi >= 0 && gi === turn ? " is-turn" : "") + (dead ? " is-dead" : "");
+        (gi >= 0 && gi === turn ? " is-turn" : "") + (dead ? " is-dead" : "") +
+        (m.absent ? " is-away" : "");
       return '<li class="' + cls + '">' +
         '<span class="roster__name">' + esc(m.name) + "</span>" +
         (m.id === me.id ? '<span class="roster__you">' + esc(t("roster.you")) + '</span>' : "") +
         (m.id === room.hostId ? '<span class="roster__host">' + esc(t("roster.host")) + '</span>' : "") +
+        (m.absent ? '<span class="roster__away">AFK</span>' : "") +
         (room.hostId === me.id && m.id !== me.id
           ? '<button class="btn btn--ghost btn--sm" type="button" data-kick="' + m.id + '">' + esc(t("roster.kick")) + '</button>' : "") +
         "</li>";

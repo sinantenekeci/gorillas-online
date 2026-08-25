@@ -340,3 +340,79 @@ test("ayağı oyulan goril düşer ve bu atış mesajıyla bildirilir", async ()
   await a.close();
   await b.close();
 });
+
+/* Telefon arka plana dusup baglanti kopunca oyuncu elenmemeli; ayni jetonla
+   geri donunce eski koltuguna oturmali. Gercek soket uzerinden dogrulaniyor
+   cunku jeton baglanti adresinden geliyor. */
+function connectWithToken(name, token) {
+  const ws = new WebSocket(base.replace("http", "ws") + "/ws?t=" + token);
+  const inbox = [];
+  const c = {
+    ws, inbox, name, id: null,
+    send(o) { ws.send(JSON.stringify(o)); },
+    last(t) { for (let i = inbox.length - 1; i >= 0; i--) if (inbox[i].t === t) return inbox[i]; return null; },
+    all(t) { return inbox.filter((m) => m.t === t); },
+    clear() { inbox.length = 0; },
+    async wait(t, ms) {
+      const end = Date.now() + (ms || 3000);
+      while (Date.now() < end) { const m = c.last(t); if (m) return m; await sleep(10); }
+      throw new Error("beklenen mesaj gelmedi: " + t);
+    },
+    close() { return new Promise((r) => { ws.on("close", r); ws.close(); }); }
+  };
+  ws.on("message", (d) => {
+    const m = JSON.parse(d.toString());
+    inbox.push(m);
+    if (m.t === "welcome") c.id = m.id;
+  });
+  return new Promise((res, rej) => {
+    ws.on("open", () => { c.send({ t: "rename", name: name }); res(c); });
+    ws.on("error", rej);
+  });
+}
+
+test("bağlantı kopan oyuncu elenmez, aynı jetonla koltuğuna döner", async () => {
+  const jeton = "e2ejetonabcdef123456";
+  const host = await connectWithToken("EvSahibi", "e2ehostjeton1234567");
+  await host.wait("welcome");
+  host.send({ t: "create", name: "Kopma E2E", settings: { rounds: 3, turnSeconds: 120 } });
+  const roomId = (await host.wait("joined")).roomId;
+
+  const mobil = await connectWithToken("Mobil", jeton);
+  await mobil.wait("welcome");
+  const eskiId = mobil.id;
+  mobil.send({ t: "join", roomId: roomId });
+  await mobil.wait("joined");
+  host.send({ t: "start" });
+  await host.wait("round", 6000);
+
+  const oda = hub.rooms.get(roomId);
+  const gorilIndeksi = oda.match.players.find((p) => p.id === eskiId).gorilla;
+
+  // telefon arka plana dustu: soket kapandi
+  await mobil.close();
+  await sleep(120);
+
+  assert.ok(oda.members.some((m) => m.id === eskiId), "oyuncu odadan silinmemeli");
+  assert.strictEqual(oda.match.state.gorillas[gorilIndeksi].dead, false, "gorili ölmemeli");
+  assert.ok(oda.match, "maç sürmeli");
+
+  // ekran acildi: ayni jetonla geri baglaniyor
+  const geri = await connectWithToken("Mobil", jeton);
+  const hos = await geri.wait("welcome");
+  assert.strictEqual(hos.id, eskiId, "kimlik korunmalı");
+  const girdi = await geri.wait("joined");
+  assert.strictEqual(girdi.roomId, roomId, "eski odasına dönmeli");
+
+  const durum = await geri.wait("roomState");
+  const ben = durum.members.find((m) => m.id === eskiId);
+  assert.ok(ben, "oda listesinde olmalı");
+  assert.strictEqual(ben.absent, false, "artık AFK olmamalı");
+  assert.ok(ben.team === "red" || ben.team === "blue", "izleyiciye değil takıma dönmeli");
+  assert.ok(durum.match, "maç hâlâ sürmeli");
+  assert.strictEqual(durum.match.players.find((p) => p.id === eskiId).gorilla, gorilIndeksi,
+    "aynı gorili sürmeli");
+
+  await host.close();
+  await geri.close();
+});

@@ -22,9 +22,24 @@
     if (list) for (let i = 0; i < list.length; i++) list[i](data);
   };
 
+  /* Kalıcı oyuncu jetonu: telefon arka plana düşüp bağlantı kopunca sunucu
+     dönen bağlantıyı bu jetonla eski koltuğuna oturtur. Yetki taşımaz,
+     yalnızca kimlik eşlemek içindir. */
+  Net.prototype.token = function () {
+    var t = null;
+    try { t = localStorage.getItem("gor.token"); } catch (e) { t = null; }
+    if (!t || !/^[A-Za-z0-9_-]{8,64}$/.test(t)) {
+      var abc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+      t = "";
+      for (var i = 0; i < 24; i++) t += abc[Math.floor(Math.random() * abc.length)];
+      try { localStorage.setItem("gor.token", t); } catch (e) { /* gizli sekme */ }
+    }
+    return t;
+  };
+
   Net.prototype.url = function () {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    return proto + "//" + location.host + "/ws";
+    return proto + "//" + location.host + "/ws?t=" + encodeURIComponent(this.token());
   };
 
   Net.prototype.connect = function () {

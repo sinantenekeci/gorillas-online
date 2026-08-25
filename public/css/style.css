@@ -395,6 +395,8 @@ main { max-width: 1440px; margin: 0 auto; padding: var(--s5) var(--s4) var(--s7)
 .roster__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .roster__you { color: var(--warn); font-size: 14px; letter-spacing: .1em; }
 .roster__host { color: var(--ega-cyan); font-size: 14px; letter-spacing: .1em; }
+.roster__away { color: var(--warn); font-size: 14px; letter-spacing: .1em; }
+.roster li.is-away { opacity: .6; }
 .roster .btn { margin-left: auto; }
 .roster--empty { color: var(--fg-dim); font-size: 17px; justify-content: center; }
 #startBtn { margin-top: var(--s3); }

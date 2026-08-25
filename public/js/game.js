@@ -41,6 +41,7 @@
   const SURPRISE_MS = 5000;
   const TEAM_BODY = { red: "#D04040", blue: "#4878E0" };
   const CURSE = "$#@%";
+  const AFK = "AFK";                 // baglantisi kopan gorilin kafasindaki etiket
   const BUBBLE_FRAMES = 60;          // kufur balonu ~1 saniye
   const TEAM_TEXT = { red: "#FF9A9A", blue: "#A8C4FF" };
 
@@ -218,6 +219,7 @@
     this.lying = {};            // i -> goril yatay duruyor
     this.xeyes = {};            // i -> olu, gozler x x
     this.bubble = {};           // i -> kufur balonu goruniyor
+    this.away = {};             // i -> oyuncu baglantida degil (AFK etiketi)
     this.idleText = "ODA HAZIR";
     this.teamLabel = { red: "Kırmızı", blue: "Mavi" };   // dil seçimiyle değişir
     this.onShotDone = null;
@@ -282,6 +284,13 @@
     this.lying = {}; this.xeyes = {}; this.bubble = {};
     this.players = [];
     this.idleText = text || "OYUNCULAR BEKLENİYOR";
+  };
+
+  /* Baglantisi kopan oyuncularin gorillerine AFK etiketi konur; liste
+     sunucudan gelen oda durumundan beslenir. */
+  GameView.prototype.setAway = function (indeksler) {
+    this.away = {};
+    (indeksler || []).forEach((i) => { this.away[i] = true; });
   };
 
   GameView.prototype.setTurn = function (turn) {
@@ -667,6 +676,7 @@
       this.drawGorilla(g, this.arms[i] || 0, this.xeyes[i] ? "" : this.nameOfGorilla(i),
         { lying: !!this.lying[i], xeyes: !!this.xeyes[i] });
       if (this.bubble[i]) this.drawBubble(g.x, g.y, CURSE);
+      else if (this.away[i] && !g.dead) this.drawBubble(g.x, g.y, AFK);
     }
     if (!this.ban && !this.boom) this.drawAim();
     if (this.ban) {
