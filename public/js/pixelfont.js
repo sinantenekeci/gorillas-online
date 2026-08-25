@@ -152,10 +152,11 @@
     return true;
   }
 
-  function measure(text, scale) {
+  function measure(text, scale, bold) {
     scale = scale || 1;
     var n = String(text == null ? "" : text).length;
-    return { w: Math.max(0, n * ADV - 1) * scale, h: CH * scale };
+    var extra = (bold && scale >= BOLD_MIN_SCALE) ? 1 : 0;   // kalin cizim bir piksel tasar
+    return { w: Math.max(0, n * ADV - 1) * scale + extra, h: CH * scale };
   }
 
   function rowBits(ctx, bits, x, y, scale) {
@@ -165,12 +166,24 @@
   }
 
   /* Harfleri dogrudan hedefe basar. x,y sol-ust kose; ikisi de tam sayiya
-     yuvarlanir, aksi halde fillRect yarim piksele denk gelip yine bulaniklasir. */
-  function draw(ctx, text, x, y, scale, color) {
+     yuvarlanir, aksi halde fillRect yarim piksele denk gelip yine bulaniklasir.
+
+     Kalin (bold) yazi, ayni cizimi BIR EKRAN PIKSELI saga kaydirip tekrar
+     basarak elde edilir — bir font pikseli kaydirmak degil. Olcek 2'de govde
+     2'den 3 piksele cikar, harf ici bosluk 2'den 1'e iner; harf hala okunur.
+     Olcek 1'de bosluk tamamen kapanacagi icin kalin kullanmayin. */
+  var BOLD_MIN_SCALE = 2;
+
+  function draw(ctx, text, x, y, scale, color, bold) {
     text = String(text == null ? "" : text);
     scale = scale || 1;
     x = Math.round(x); y = Math.round(y);
     ctx.fillStyle = color;
+    paint(ctx, text, x, y, scale);
+    if (bold && scale >= BOLD_MIN_SCALE) paint(ctx, text, x + 1, y, scale);
+  }
+
+  function paint(ctx, text, x, y, scale) {
     for (var i = 0; i < text.length; i++) {
       var gl = glyphOf(text[i]);
       if (!gl) continue;
@@ -186,12 +199,12 @@
   var cache = new Map();
   var CACHE_MAX = 240;
 
-  function bitmap(text, scale, color, outline) {
-    var key = text + "|" + scale + "|" + color + "|" + (outline || "");
+  function bitmap(text, scale, color, outline, bold) {
+    var key = text + "|" + scale + "|" + color + "|" + (outline || "") + "|" + (bold ? "b" : "");
     var hit = cache.get(key);
     if (hit) return hit;
 
-    var m = measure(text, scale);
+    var m = measure(text, scale, bold);
     var pad = outline ? scale : 0;
     var cv = document.createElement("canvas");
     cv.width = Math.max(1, m.w + pad * 2);
@@ -202,11 +215,11 @@
       for (var dy = -1; dy <= 1; dy++) {
         for (var dx = -1; dx <= 1; dx++) {
           if (!dx && !dy) continue;
-          draw(c, text, pad + dx * scale, pad + dy * scale, scale, outline);
+          draw(c, text, pad + dx * scale, pad + dy * scale, scale, outline, bold);
         }
       }
     }
-    draw(c, text, pad, pad, scale, color);
+    draw(c, text, pad, pad, scale, color, bold);
 
     if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value);
     cache.set(key, cv);
@@ -214,10 +227,10 @@
   }
 
   /* align: "left" | "center" | "right", baseline: "top" | "middle" | "bottom" */
-  function blit(ctx, text, x, y, scale, color, outline, align, baseline) {
+  function blit(ctx, text, x, y, scale, color, outline, align, baseline, bold) {
     text = String(text == null ? "" : text);
     if (!text) return;
-    var cv = bitmap(text, scale || 1, color, outline);
+    var cv = bitmap(text, scale || 1, color, outline, bold);
     var ox = align === "center" ? Math.round(x - cv.width / 2)
       : align === "right" ? Math.round(x - cv.width) : Math.round(x);
     var oy = baseline === "middle" ? Math.round(y - cv.height / 2)
@@ -226,7 +239,7 @@
   }
 
   global.PixelFont = {
-    CELL_W: CW, CELL_H: CH, ADVANCE: ADV,
+    CELL_W: CW, CELL_H: CH, ADVANCE: ADV, BOLD_MIN_SCALE: BOLD_MIN_SCALE,
     supports: supports, measure: measure,
     draw: draw, bitmap: bitmap, blit: blit
   };

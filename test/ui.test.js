@@ -110,6 +110,39 @@ test("ölçü tam sayı ölçekle doğrusal büyür", () => {
   assert.deepStrictEqual(PF.measure("", 1), { w: 0, h: 9 });
 });
 
+/* Kalın yazı, çizimi bir EKRAN pikseli sağa kaydırıp tekrar basarak elde
+   edilir. Bir font pikseli kaydırılsaydı harf içi boşluklar kapanır, yazı
+   okunmaz bir kütleye dönerdi. */
+function cizilenPiksel(text, scale, bold) {
+  const nokta = new Set();
+  const ctx = {
+    fillStyle: "",
+    fillRect(x, y, w, h) {
+      for (let i = 0; i < w; i++) for (let j = 0; j < h; j++) nokta.add((x + i) + "," + (y + j));
+    }
+  };
+  PF.draw(ctx, text, 0, 0, scale, "#fff", bold);
+  return nokta;
+}
+
+test("kalın yazı gövdeyi kalınlaştırır ama boyu değiştirmez", () => {
+  const ince = cizilenPiksel("MAÇ", 2, false);
+  const kalin = cizilenPiksel("MAÇ", 2, true);
+  assert.ok(kalin.size > ince.size, "kalın daha çok piksel basmalı");
+  for (const p of ince) assert.ok(kalin.has(p), "kalın, ince çizimi kapsamalı");
+  assert.strictEqual(PF.measure("MAÇ", 2, true).h, PF.measure("MAÇ", 2, false).h);
+  assert.strictEqual(PF.measure("MAÇ", 2, true).w, PF.measure("MAÇ", 2, false).w + 1);
+});
+
+/* Ölçek 1'de harf gövdesi ve boşluğu birer piksel; kalınlaştırmak boşluğu
+   tamamen kapatırdı, o yüzden bu ölçekte yok sayılır. */
+test("ölçek 1'de kalın istek yok sayılır", () => {
+  const ince = cizilenPiksel("MAÇ", 1, false);
+  const kalin = cizilenPiksel("MAÇ", 1, true);
+  assert.strictEqual(kalin.size, ince.size);
+  assert.deepStrictEqual(PF.measure("MAÇ", 1, true), PF.measure("MAÇ", 1, false));
+});
+
 /* Yarım piksele düşen bir dikdörtgen büyütülen sahnede yumuşak kenar yapar. */
 test("harfler tam sayı piksellere basılır", () => {
   const cizilen = [];

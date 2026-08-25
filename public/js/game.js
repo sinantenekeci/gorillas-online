@@ -56,8 +56,11 @@
 
   /* Piksel font ölçekleri. Font tam sayı katlarla büyür; isimler ölçek 1'de
      7 piksel yüksekliğinde, eski 9px Courier'in ~6 pikselinden bir birim
-     büyük ve konturuyla birlikte okunaklı. */
-  const NAME_SCALE = 1, HUD_SCALE = 2, IDLE_SCALE = 2, BUBBLE_SCALE = 1;
+     büyük ve konturuyla birlikte okunaklı.
+
+     Skor yazısı bilinçli olarak sahne yazısından küçük: ölçek 2 fazla
+     baskındı, tabelanın hemen altında ikinci bir başlık gibi duruyordu. */
+  const NAME_SCALE = 1, HUD_SCALE = 1, IDLE_SCALE = 2, BUBBLE_SCALE = 1;
 
   /* ---------- keskin piksel çizimi ----------
      Canvas'ın arc/lineTo/fillText yolları her zaman kenar yumuşatması üretir.
@@ -199,7 +202,7 @@
     this.xeyes = {};            // i -> olu, gozler x x
     this.bubble = {};           // i -> kufur balonu goruniyor
     this.idleText = "ODA HAZIR";
-    this.teamLabel = { red: "KIRMIZI", blue: "MAVİ" };   // dil seçimiyle değişir
+    this.teamLabel = { red: "Kırmızı", blue: "Mavi" };   // dil seçimiyle değişir
     this.onShotDone = null;
 
     this._last = 0;
@@ -500,7 +503,7 @@
     const ctx = this.ctx, p = this.pal();
     ctx.fillStyle = p.sky; ctx.fillRect(0, 0, W, H);
     this.drawCelestial();
-    PF.blit(ctx, this.idleText, W / 2, H / 2, IDLE_SCALE, p.idle, null, "center", "middle");
+    PF.blit(ctx, this.idleText, W / 2, H / 2, IDLE_SCALE, p.idle, null, "center", "middle", true);
   };
 
   GameView.prototype.render = function () {

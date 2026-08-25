@@ -80,7 +80,8 @@
     });
 
     el.langLabel.textContent = lang.toUpperCase();
-    view.teamLabel = { red: t("team.red"), blue: t("team.blue") };
+    // sahnedeki skor yazısı baş harfi büyük ("Kırmızı:"), tabeladaki tümü büyük
+    view.teamLabel = { red: t("team.redName"), blue: t("team.blueName") };
     applySound();
     if (!view.state) view.idleText = t(idleKey);
     renderLobby();
@@ -655,20 +656,36 @@
   /* Örtü yazıları piksel fontla canvas'a çizilir; web fontu her boyutta
      kenar yumuşatması üretiyordu. İçerik bir işlevden okunur ki dil
      değişince ya da geri sayım ilerleyince aynı yerden yeniden çizilsin. */
-  const OVERLAY_TITLE_SCALE = 3, OVERLAY_TEXT_SCALE = 2;
+  /* Ölçek, sahne içindeki "MAÇ BEKLENİYOR" yazısıyla aynı (game.js:IDLE_SCALE).
+     Başlık kalın, alt satır ince: ikisi de aynı boyda olduğu için ayrım
+     kalınlık ve renkten geliyor. */
+  const OVERLAY_TITLE_SCALE = 2, OVERLAY_TEXT_SCALE = 2;
   const OVERLAY_TITLE_COLOR = "#FCFC54", OVERLAY_TEXT_COLOR = "#97A3BE";
   let overlayFn = null;
 
-  function pixLine(host, cv, txt, text, scale, color) {
+  /* Sahne canvas'ının ekrandaki küçültme oranı (960 iç piksel → kaç ekran px). */
+  function stageScale() {
+    const w = $("c").getBoundingClientRect().width;
+    return w ? w / GorillasCore.W : 1;
+  }
+  window.addEventListener("resize", redrawOverlay);
+
+  function pixLine(host, cv, txt, text, scale, color, bold) {
     text = text || "";
     txt.textContent = text;
     if (text && PixelFont.supports(text)) {
-      const bm = PixelFont.bitmap(text, scale, color);
+      const bm = PixelFont.bitmap(text, scale, color, null, bold);
       cv.width = bm.width; cv.height = bm.height;
       const c = cv.getContext("2d");
       c.imageSmoothingEnabled = false;
       c.clearRect(0, 0, cv.width, cv.height);
       c.drawImage(bm, 0, 0);
+      /* Sahne canvas'ı 960 pikselden kutuya sığdırılıyor; örtü yazısı 1:1
+         basılsaydı aynı ölçekte çizilmesine rağmen sahnedeki yazıdan büyük
+         görünürdü. Genişliği sahnenin küçültme oranıyla çarpınca ikisi
+         tıpatıp eşleşir. Yüzde vermek işe yaramaz: örtü kutusu içeriğe göre
+         daraldığı için yüzde kendi genişliğine dönüp çöküyor. */
+      cv.style.width = (bm.width * stageScale()).toFixed(2) + "px";
       cv.hidden = false;
       host.classList.add("is-pixel");     // yedek metin ekran okuyucuya kalır
     } else {
@@ -686,9 +703,9 @@
     if (!overlayFn || el.overlay.hidden) return;
     const o = overlayFn();
     pixLine(el.overlayTitle, el.overlayTitleCv, el.overlayTitleTxt,
-      o.title, OVERLAY_TITLE_SCALE, OVERLAY_TITLE_COLOR);
+      o.title, OVERLAY_TITLE_SCALE, OVERLAY_TITLE_COLOR, true);
     pixLine(el.overlayText, el.overlayTextCv, el.overlayTextTxt,
-      o.text, OVERLAY_TEXT_SCALE, OVERLAY_TEXT_COLOR);
+      o.text, OVERLAY_TEXT_SCALE, OVERLAY_TEXT_COLOR, false);
   }
   function hideOverlay() { overlayFn = null; el.overlay.hidden = true; }
 
