@@ -448,7 +448,10 @@ test("maç sürerken takım değiştirilemez", async () => {
   assert.strictEqual(hub.clients.get(c.id).team, null);
 });
 
-test("nişan bilgisi yalnızca sırası gelen oyuncudan yayılır", async () => {
+/* Sırasını bekleyen oyuncu da kaydırıcılarını oynatıp hazırlanabiliyor; bu
+   hazırlık kendi gorilinden çıkan çizgi olarak herkese yansıyor. Atış hakkı
+   yine yalnızca sırası gelende (ayrı testte). */
+test("nişan bilgisi maçtaki her oyuncudan yayılır, kendine geri dönmez", async () => {
   const hub = mkHub(100);
   const { a, b, basladi } = await kurVeBaslat(hub);
   assert.ok(basladi);
@@ -461,7 +464,31 @@ test("nişan bilgisi yalnızca sırası gelen oyuncudan yayılır", async () => 
 
   a.clear();
   hub.handle(b.id, { t: "aim", angle: 10, velocity: 20 });
-  assert.strictEqual(a.last("aim"), null, "sırası olmayanın nişanı yayılmaz");
+  assert.ok(a.last("aim"), "sırası olmayanın nişanı da yayılmalı");
+  assert.strictEqual(a.last("aim").shooter, 1, "kendi gorilinden çıkmalı");
+  assert.strictEqual(a.last("aim").velocity, 20);
+});
+
+test("izleyicinin nişanı yayılmaz", async () => {
+  const hub = mkHub(100);
+  const { a, b, id, basladi } = await kurVeBaslat(hub);
+  assert.ok(basladi);
+  const c = mkClient(hub, "İzleyici");
+  hub.handle(c.id, { t: "join", roomId: id });      // maç sürüyor, izleyici kalır
+
+  a.clear(); b.clear();
+  hub.handle(c.id, { t: "aim", angle: 45, velocity: 100 });
+  assert.strictEqual(a.last("aim"), null, "izleyici nişan yayamaz");
+  assert.strictEqual(b.last("aim"), null);
+});
+
+test("sırası olmayan oyuncu atış yapamaz", async () => {
+  const hub = mkHub(100);
+  const { a, b, basladi } = await kurVeBaslat(hub);
+  assert.ok(basladi);
+  a.clear(); b.clear();
+  hub.handle(b.id, { t: "fire", angle: 45, velocity: 100 });
+  assert.strictEqual(a.last("shot"), null, "sırası olmayanın atışı yok sayılmalı");
 });
 
 test("atış parametreleri sunucuda sınırlanır", async () => {
@@ -646,4 +673,27 @@ test("maç yokken kopan oyuncu odadan çıkar", async () => {
 
   hub.removeClient(b.id);
   assert.ok(!hub.rooms.get(id).members.some((m) => m.id === b.id), "odadan çıkmalı");
+});
+
+/* Yeni raunda önceki raundu KAYBEDEN takım başlar; 1v1'de bu "vurulan oyuncu
+   ilk atar" demek. Eskiden sıra yalnızca raunt numarasının tek/çift olmasına
+   bakıyordu, yani vurulan oyuncu bir sonraki raunda da ikinci başlıyordu. */
+test("yeni raunda önceki raundu kaybeden takım başlar", async () => {
+  const hub = mkHub(100);
+  const { a, id, basladi } = await kurVeBaslat(hub, { rounds: 3 });
+  assert.ok(basladi);
+  const room = hub.rooms.get(id);
+
+  // ilk raunt: kırmızı başlar
+  assert.strictEqual(room.match.order[0], 0, "ilk raundu kırmızı açmalı");
+
+  // kırmızı kazansın: mavi kaybettiği için sonraki raunda mavi başlamalı
+  room.match.lastLoser = "blue";
+  room.match.round = 1;
+  hub.startRound(room);
+  assert.strictEqual(room.match.order[0], 1, "kaybeden mavi açmalı");
+
+  room.match.lastLoser = "red";
+  hub.startRound(room);
+  assert.strictEqual(room.match.order[0], 0, "kaybeden kırmızı açmalı");
 });

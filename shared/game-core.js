@@ -37,14 +37,24 @@
      Bina olculeri zemin izgarasinin hucre boyuna (CELL) hizalidir. Hizasiz
      olsalardi binanin son 1 piksellik sutunu hicbir hucreye dusmez, kopan
      parca tasindiginda o sutun havada asili kalirdi — ekranda ince bir cizgi
-     olarak goruluyordu. Yeni olcu ekleyecekseniz CELL katinda tutun. */
+     olarak goruluyordu. Yeni olcu ekleyecekseniz CELL katinda tutun.
+
+     Binalar arasi bosluk gorunur bir SOKAK genisligindedir. Eskiden 2 piksel
+     idi: goze carpmayan ama zemine kadar acik bir koridor. Muz oradan asagi
+     iniyor, yolda bir piksel yana kayinca duvarin icinde patliyordu; 24
+     yaricapli krater iki binayi da iceriden yiyor, disarida ince duvarlar
+     kaliyordu. Ekranda "binanin ortasinda yuvarlak delik" olarak goruluyor
+     ve hata sanilıyordu. Olculdu: zemine carpan atislarin %30'u bu
+     koridorlara giriyordu. Davranis dogru, gorunmez olmasi yanlisti. */
+  var STREET = 6;                  // binalar arasi bosluk (CELL kati olmali)
+
   function makeCity(rnd) {
     var buildings = [], x = 2;
     while (x < W - 2) {
-      var w = 32 + CELL * Math.floor(rnd() * (28 / CELL));
+      var w = 28 + CELL * Math.floor(rnd() * (24 / CELL));
       if (W - 2 - x < w) w = W - 2 - x - ((W - 2 - x) % CELL);
-      if (w < 26) {
-        if (buildings.length) buildings[buildings.length - 1].w += w + 2;
+      if (w < 24) {
+        if (buildings.length) buildings[buildings.length - 1].w += w + STREET;
         break;
       }
       var h = 70 + CELL * Math.floor(rnd() * (190 / CELL));
@@ -55,7 +65,7 @@
         }
       }
       buildings.push(b);
-      x += w + 2;
+      x += w + STREET;
     }
     return buildings;
   }
@@ -85,6 +95,13 @@
   /* Kirmizi takim sahanin solunu, mavi takim sagini tutar; her goril kendi
      takiminin yonune (facing) dogru atar. Tek kisilik takimlarda bu, eski
      iki oyunculu duzenin aynisidir. */
+  /* Karşı takımın en yakın iki gorili arasında en az bu kadar yatay mesafe
+     olmalı. Nişan çizgisinin en uzun yatay erişimi 105 piksel; daha yakın
+     başlayan iki oyuncuda ilk atan zaten vuruyordu, adil değildi.
+     Yalnız 1'e 1'de uygulanıyor: 4'e 4'te sahaya sığdırmak sahanın ortasında
+     büyük bir boşluk bırakıyor. Saha genişlerse yeniden bakılabilir. */
+  var MIN_DUEL_GAP = 150;
+
   function placeGorillas(buildings, rnd, redCount, blueCount) {
     if (typeof redCount !== "number") redCount = 1;
     if (typeof blueCount !== "number") blueCount = 1;
@@ -92,6 +109,9 @@
     var mid = Math.floor(n / 2);
     var reds = pickSlots(redCount, 1, Math.max(1, mid - 1), rnd);
     var blues = pickSlots(blueCount, Math.min(mid, n - 2), n - 2, rnd);
+    if (redCount === 1 && blueCount === 1) {
+      spreadDuel(buildings, reds, blues);
+    }
     var out = [];
     function push(idx, team, facing) {
       var b = buildings[Math.max(0, Math.min(idx, n - 1))];
@@ -103,6 +123,24 @@
     reds.forEach(function (i) { push(i, "red", 1); });
     blues.forEach(function (i) { push(i, "blue", -1); });
     return out;
+  }
+
+  /* İki goril birbirine çok yakın düştüyse onları dışa doğru açar. Kırmızı
+     sola, mavi sağa kayar; kenara dayanınca durur. Rastgelelik dizisini
+     tüketmez, böylece şehir ve rüzgâr aynı kalır. */
+  function spreadDuel(buildings, reds, blues) {
+    var merkez = function (i) {
+      var b = buildings[Math.max(0, Math.min(i, buildings.length - 1))];
+      return b.x + b.w / 2;
+    };
+    for (var adim = 0; adim < buildings.length; adim++) {
+      if (merkez(blues[0]) - merkez(reds[0]) >= MIN_DUEL_GAP) return;
+      var soldaYer = reds[0] > 1;
+      var sagdaYer = blues[0] < buildings.length - 2;
+      if (!soldaYer && !sagdaYer) return;                 // saha bu kadarına elveriyor
+      if (soldaYer && (!sagdaYer || adim % 2 === 0)) reds[0]--;
+      else blues[0]++;
+    }
   }
 
   /* ---------- bulutlar ----------
@@ -989,7 +1027,7 @@
 
   return {
     W: W, H: H, GW: GW, GH: GH, SUN: SUN, DT: DT, SUB: SUB, BCOL: BCOL,
-    CELL: CELL, GCOLS: GCOLS, GROWS: GROWS,
+    CELL: CELL, GCOLS: GCOLS, GROWS: GROWS, STREET: STREET, MIN_DUEL_GAP: MIN_DUEL_GAP,
     buildGrid: buildGrid, rebuildGrid: rebuildGrid, applyCrater: applyCrater,
     pushEdit: pushEdit, forEachCraterCell: forEachCraterCell,
     applyEdit: applyEdit, spansOf: spansOf, cellsOfSpans: cellsOfSpans,

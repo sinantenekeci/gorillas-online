@@ -394,6 +394,7 @@ class Hub {
       order: [],
       turnPos: 0,
       turn: -1,
+      lastLoser: null,        // onceki raundu kaybeden takim; yeni raunda o baslar
       phase: "aim",
       turnEndsAt: 0
     };
@@ -429,8 +430,10 @@ class Hub {
       if (i < red.length) m.order.push(i);
       if (i < blue.length) m.order.push(red.length + i);
     }
-    // tek sayılı raunttlarda kırmızı, çift sayılılarda mavi başlar
-    if (m.round % 2 === 0) m.order.reverse();
+    /* Yeni raunda ONCEKI RAUNDU KAYBEDEN takim baslar. 1v1 icin bu, "vurulan
+       oyuncu ilk atar" demek; kalabalik takimlarda da ayni adalet dogal
+       bicimde genellesir. Ilk raunt ve beraberlikte kirmizi baslar. */
+    if (m.lastLoser === "blue") m.order.reverse();
 
     m.turnPos = -1;
     m.phase = "aim";
@@ -584,7 +587,10 @@ class Hub {
     else if (blueAlive && !redAlive) winner = "blue";
 
     m.phase = "roundover";
-    if (winner) m.scores[winner]++;
+    if (winner) {
+      m.scores[winner]++;
+      m.lastLoser = winner === "red" ? "blue" : "red";
+    }
     this.broadcast(room, { t: "roundEnd", winner: winner, scores: m.scores });
     if (winner) this.sys(room, "sys.roundWin", { team: winner, red: m.scores.red, blue: m.scores.blue });
     else this.sys(room, "sys.roundDraw");
@@ -707,11 +713,16 @@ class Hub {
   }
 
   /* Sırası gelen oyuncunun kaydırıcı hareketi diğerlerine yansır. */
+  /* Nişan yansıması yalnızca sırası gelene değil, maçtaki HER oyuncuya açık:
+     sırasını bekleyen de kaydırıcılarını oynatıp hazırlanabiliyor ve bu
+     hazırlık kendi gorilinden çıkan çizgi olarak herkese yansıyor. Atış
+     hakkı elbette hâlâ yalnızca sırası gelende. */
   aim(client, msg) {
     const room = this.rooms.get(client.roomId);
     if (!room || !room.match) return;
-    const p = this.playerByGorilla(room, room.match.turn);
-    if (!p || p.id !== client.id) return;
+    const p = room.match.players.find((x) => x.id === client.id);
+    if (!p) return;                                   // izleyici nişan almaz
+    if (room.match.state.gorillas[p.gorilla].dead) return;
     const now = this.now();
     if (now - client.lastAim < AIM_MIN_INTERVAL_MS) return;
     client.lastAim = now;
@@ -719,7 +730,7 @@ class Hub {
     const velocity = Math.round(clamp(msg.velocity, 1, 200, 50));
     for (const m of room.members) {
       if (m.id !== client.id) {
-        this.send(m, { t: "aim", shooter: room.match.turn, angle: angle, velocity: velocity });
+        this.send(m, { t: "aim", shooter: p.gorilla, angle: angle, velocity: velocity });
       }
     }
   }

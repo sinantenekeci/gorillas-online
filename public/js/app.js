@@ -80,8 +80,6 @@
     });
 
     el.langLabel.textContent = lang.toUpperCase();
-    // sahnedeki skor yazısı baş harfi büyük ("Kırmızı:"), tabeladaki tümü büyük
-    view.teamLabel = { red: t("team.redName"), blue: t("team.blueName") };
     applySound();
     if (!view.state) view.idleText = t(idleKey);
     renderLobby();
@@ -731,8 +729,13 @@
       room.match.turn === myGorilla && phase === "aim";
   }
 
+  /* Kaydırıcılar sırasını bekleyen oyuncuya da açık: hazırlığını önceden
+     yapabilsin. Atış hakkı yalnızca sırası gelende. */
   function setControls(on) {
-    el.ang.disabled = el.vel.disabled = el.fireBtn.disabled = !on;
+    el.fireBtn.disabled = !on;
+    const oynayan = !!room && !!room.match && myGorilla >= 0 &&
+      !(room.match.dead && room.match.dead[myGorilla]);
+    el.ang.disabled = el.vel.disabled = !oynayan;
   }
 
   function updateTurnUI() {
@@ -761,17 +764,25 @@
   }
 
   let aimTimer = 0;
+  /* Sahadaki her oyuncu nişanını yayar; sırası gelmemiş olması hazırlık
+     yapmasını engellemez. Sunucu izleyiciyi ve ölü gorili zaten eliyor. */
+  function inMatch() {
+    return !!room && !!room.match && myGorilla >= 0 &&
+      !(room.match.dead && room.match.dead[myGorilla]);
+  }
+
   function sendAim() {
+    if (!inMatch()) return;
     view.setAim(myGorilla, +el.ang.value, +el.vel.value);
     if (aimTimer) return;
     aimTimer = setTimeout(() => {
       aimTimer = 0;
-      if (isMyTurn()) net.send({ t: "aim", angle: +el.ang.value, velocity: +el.vel.value });
+      if (inMatch()) net.send({ t: "aim", angle: +el.ang.value, velocity: +el.vel.value });
     }, 80);
   }
 
   [el.ang, el.vel].forEach((n) => {
-    n.addEventListener("input", () => { readouts(); if (isMyTurn()) sendAim(); });
+    n.addEventListener("input", () => { readouts(); sendAim(); });
     n.addEventListener("keydown", (e) => { if (e.key === "Enter") fire(); });
   });
 

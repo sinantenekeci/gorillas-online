@@ -31,9 +31,11 @@ test("şehir sahneyi baştan sona doldurur ve binalar çakışmaz", () => {
     for (let i = 1; i < s.buildings.length; i++) {
       const prev = s.buildings[i - 1], cur = s.buildings[i];
       assert.ok(cur.x >= prev.x + prev.w, "binalar üst üste binmemeli");
+      assert.strictEqual(cur.x - (prev.x + prev.w), core.STREET, "aralarinda sokak kalmali");
     }
     const last = s.buildings[s.buildings.length - 1];
-    assert.ok(last.x + last.w >= core.W - 4, "sağ kenara kadar dolmalı");
+    // sag kenarda en fazla bir sokak genisligi bosluk kalabilir
+    assert.ok(last.x + last.w >= core.W - core.STREET - 2, "sağ kenara kadar dolmalı");
     assert.strictEqual(s.gorillas.length, 2);
     assert.ok(s.gorillas[0].x < s.gorillas[1].x, "soldaki goril solda olmalı");
   }
@@ -707,4 +709,42 @@ test("düşme sunucu ve istemcide aynı sonucu verir", () => {
   core.applyImpact(a.s, im); core.applyImpact(b.s, im);
   assert.deepStrictEqual(core.settleGorillas(a.s), core.settleGorillas(b.s));
   assert.strictEqual(a.g.y, b.g.y);
+});
+
+/* ---------------- adil başlangıç mesafesi ----------------
+   Nişan çizgisinin en uzun yatay erişimi 105 piksel. Daha yakın başlayan iki
+   oyuncuda ilk atan zaten vuruyordu; ölçülen en yakın mesafe 45 pikseldi. */
+test("1v1'de rakipler nişan çizgisinden uzakta başlar", () => {
+  let enYakin = Infinity;
+  for (let seed = 0; seed < 300; seed++) {
+    const s = core.createRound(seed, { red: 1, blue: 1 });
+    const d = s.gorillas[1].x - s.gorillas[0].x;
+    enYakin = Math.min(enYakin, d);
+    assert.ok(d >= core.MIN_DUEL_GAP,
+      "tohum " + seed + " çok yakın başlattı: " + d + " piksel");
+  }
+  assert.ok(enYakin >= core.MIN_DUEL_GAP);
+});
+
+/* Goril yerleşimi rastgelelik dizisini tüketmemeli; şehir ve rüzgâr takım
+   sayısından bağımsız kalmalı, yoksa aynı tohum farklı harita üretir. */
+test("goril yerleştirme şehri ve rüzgârı değiştirmez", () => {
+  for (let seed = 0; seed < 40; seed++) {
+    const a = core.createRound(seed, { red: 1, blue: 1 });
+    const b = core.createRound(seed, { red: 4, blue: 4 });
+    assert.deepStrictEqual(a.buildings, b.buildings, "tohum " + seed + " şehri değişti");
+  }
+});
+
+/* Sokak, muzun içine girip binayı içeriden patlatabildiği için görünür
+   genişlikte olmalı; 2 piksellik hâli hata gibi duruyordu. */
+test("binalar arasında görünür genişlikte sokak var", () => {
+  assert.ok(core.STREET >= 4, "sokak göze görünür olmalı");
+  assert.strictEqual(core.STREET % core.CELL, 0, "sokak hücre ızgarasına hizalı olmalı");
+  const s = core.createRound(11, { red: 1, blue: 1 });
+  const b1 = s.buildings[3];
+  const sokakX = b1.x + b1.w + core.STREET / 2;
+  let bos = 0;
+  for (let y = 0; y < core.H; y++) if (!core.solid(s, sokakX, y)) bos++;
+  assert.strictEqual(bos, core.H, "sokak zemine kadar açık olmalı");
 });

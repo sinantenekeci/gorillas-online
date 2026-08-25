@@ -22,6 +22,7 @@
       label: "#0A1A3A",
       teamHud: { red: "#8B1A1A", blue: "#12358C" },
       aim: "10,26,58",
+      aimTeam: { red: "168,26,26", blue: "18,53,140" },
       idle: "#0A1A3A"
     },
     night: {
@@ -35,6 +36,7 @@
       label: "#000000",
       teamHud: { red: "#FCA5A5", blue: "#A8C4FF" },
       aim: "252,252,84",
+      aimTeam: { red: "252,165,165", blue: "168,196,255" },
       idle: "#6A7290"
     }
   };
@@ -55,13 +57,21 @@
 
   const CLOUD_DRIFT = 0.08;          // rüzgâr birimi başına piksel/kare
 
+  /* Parcanin kapladigi alan (piksel kare). Sarsinti esigi goril govdesinin
+     alani: GW * GH. */
+  function spanArea(spans) {
+    let n = 0;
+    for (const s of spans) n += (s[2] - s[1] + 1);
+    return n * core.CELL * core.CELL;
+  }
+
   /* Piksel font ölçekleri. Font tam sayı katlarla büyür; isimler ölçek 1'de
      7 piksel yüksekliğinde, eski 9px Courier'in ~6 pikselinden bir birim
      büyük ve konturuyla birlikte okunaklı.
 
      Skor yazısı bilinçli olarak sahne yazısından küçük: ölçek 2 fazla
      baskındı, tabelanın hemen altında ikinci bir başlık gibi duruyordu. */
-  const NAME_SCALE = 1, HUD_SCALE = 1, IDLE_SCALE = 2, BUBBLE_SCALE = 1;
+  const NAME_SCALE = 1, IDLE_SCALE = 2, BUBBLE_SCALE = 1;
 
   /* ---------- keskin piksel çizimi ----------
      Canvas'ın arc/lineTo/fillText yolları her zaman kenar yumuşatması üretir.
@@ -169,18 +179,22 @@
     const f = a.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 900;
     s.connect(f); f.connect(g); g.connect(a.destination); s.start();
   };
-  /* Moloz yere carpinca duyulan gumburtu: patlamadan daha alcak ve daha uzun. */
-  Sound.prototype.thud = function () {
+  /* Moloz yere carpinca duyulan gumburtu. Kucuk parcalar icin daha kisa ve
+     daha alcak calinir: goril govdesinden kucuk bir moloz kocaman bir
+     gurultuyle inmemeli. */
+  Sound.prototype.thud = function (buyuk) {
     if (!this.on) return;
     const a = this.ac(); if (!a) return;
-    const len = Math.floor(a.sampleRate * 0.5);
+    const sure = buyuk ? 0.5 : 0.18;
+    const ses = buyuk ? 0.26 : 0.10;
+    const len = Math.floor(a.sampleRate * sure);
     const buf = a.createBuffer(1, len, a.sampleRate), d = buf.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 1.6);
     const s = a.createBufferSource(); s.buffer = buf;
-    const g = a.createGain(); g.gain.value = 0.26;
-    const f = a.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 220;
+    const g = a.createGain(); g.gain.value = ses;
+    const f = a.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = buyuk ? 220 : 400;
     s.connect(f); f.connect(g); g.connect(a.destination); s.start();
-    this.tone(90, 40, 0.3, "sine", 0.09);
+    if (buyuk) this.tone(90, 40, 0.3, "sine", 0.09);
   };
   Sound.prototype.fanfare = function () {
     if (!this.on) return;
@@ -207,7 +221,7 @@
     this.round = 0; this.totalRounds = 0;
     this.turn = -1;             // sırası gelen gorilin indeksi
     this.arms = [];
-    this.aim = null;            // {shooter, angle, velocity}
+    this.aims = {};             // goril indeksi -> {angle, velocity} (herkesin nisani)
     this.ban = null;            // {frames, i}
     this.boom = null;
     this.dance = null;
@@ -221,7 +235,6 @@
     this.bubble = {};           // i -> kufur balonu goruniyor
     this.away = {};             // i -> oyuncu baglantida degil (AFK etiketi)
     this.idleText = "ODA HAZIR";
-    this.teamLabel = { red: "Kırmızı", blue: "Mavi" };   // dil seçimiyle değişir
     this.onShotDone = null;
 
     this._last = 0;
@@ -255,7 +268,7 @@
     if (msg.players) this.players = msg.players.slice();
     this.turn = typeof msg.turn === "number" ? msg.turn : -1;
     this.arms = this.state.gorillas.map(() => 0);
-    this.ban = null; this.boom = null; this.dance = null; this.aim = null;
+    this.ban = null; this.boom = null; this.dance = null; this.aims = {};
     this.falls = null; this.chunks = null; this.topples = null; this.hits = null;
     this.lying = {}; this.xeyes = {}; this.bubble = {};
     this.drawCity();
@@ -279,7 +292,7 @@
 
   GameView.prototype.clear = function (text) {
     this.state = null;
-    this.ban = null; this.boom = null; this.dance = null; this.aim = null;
+    this.ban = null; this.boom = null; this.dance = null; this.aims = {};
     this.falls = null; this.chunks = null; this.topples = null; this.hits = null;
     this.lying = {}; this.xeyes = {}; this.bubble = {};
     this.players = [];
@@ -296,11 +309,11 @@
   GameView.prototype.setTurn = function (turn) {
     this.turn = turn;
     this.arms = this.arms.map(() => 0);
-    this.aim = null;
   };
 
   GameView.prototype.setAim = function (shooter, angle, velocity) {
-    this.aim = { shooter: shooter, angle: angle, velocity: velocity };
+    if (shooter < 0) return;
+    this.aims[shooter] = { angle: angle, velocity: velocity };
   };
 
   GameView.prototype.nameOfGorilla = function (i) {
@@ -488,11 +501,11 @@
   };
 
   /* Duserken cikan kufur balonu; 1 saniye sonra kayboluyor. */
-  GameView.prototype.drawBubble = function (x, y, text) {
+  GameView.prototype.drawBubble = function (x, y, text, yukari) {
     const ctx = this.ctx;
     const m = PF.measure(text, BUBBLE_SCALE);
     const w = m.w + 8, h = m.h + 5;
-    const bx = Math.round(x - w / 2), by = Math.round(y - h - 6);
+    const bx = Math.round(x - w / 2), by = Math.round(y - h - 6 - (yukari || 0));
     ctx.fillStyle = "#FCFCFC";
     ctx.fillRect(bx, by, w, h);
     ctx.fillRect(Math.round(x) - 3, by + h, 6, 5);
@@ -570,20 +583,35 @@
     this.ctx.drawImage(sprites[i], Math.round(x) - BANANA_BOX / 2, Math.round(y) - BANANA_BOX / 2);
   };
 
+  /* Maçtaki her oyuncu kaydırıcılarını oynatabildiği için sahnede aynı anda
+     birden çok nişan çizgisi olabilir. Hangisinin kim olduğu anlaşılsın diye
+     noktalar takım rengini alır; sırası gelen oyuncunun çizgisi daha parlak
+     ve daha uzun çizilir. */
+  const AIM_DOTS_TURN = 6, AIM_DOTS_IDLE = 4;
+
   GameView.prototype.drawAim = function () {
-    const a0 = this.aim;
-    if (!a0 || a0.shooter !== this.turn) return;
-    const g = this.state.gorillas[a0.shooter];
-    if (!g || g.dead) return;
+    for (const key in this.aims) {
+      const i = +key;
+      const g = this.state.gorillas[i];
+      if (!g || g.dead) continue;
+      this.drawAimOf(i, this.aims[key], i === this.turn);
+    }
+  };
+
+  GameView.prototype.drawAimOf = function (shooter, a0, aktif) {
     const ctx = this.ctx;
-    const facing = core.facingOf(this.state, a0.shooter);
+    const g = this.state.gorillas[shooter];
+    const facing = core.facingOf(this.state, shooter);
     const a = (facing > 0 ? +a0.angle : 180 - (+a0.angle)) * Math.PI / 180;
     const v = Math.max(1, +a0.velocity);
     const vx = v * Math.cos(a), vy = v * Math.sin(a);
     const w = this.state.wind, G = this.state.gravity;
-    const m = core.muzzle(this.state, a0.shooter);
+    const m = core.muzzle(this.state, shooter);
+    const renk = this.pal().aimTeam[g.team] || this.pal().aim;
+    const enFazla = aktif ? AIM_DOTS_TURN : AIM_DOTS_IDLE;
+    const taban = aktif ? 0.75 : 0.4;
     let px = m.x, py = m.y, run = 0, dots = 0, t = 0;
-    while (dots < 6 && t < 12) {
+    while (dots < enFazla && t < 12) {
       t += 0.004;
       const x = m.x + vx * t + 0.5 * w * t * t;
       const y = m.y - vy * t + 0.5 * G * t * t;
@@ -591,9 +619,8 @@
       px = x; py = y;
       if (run >= 17) {
         run = 0; dots++;
-        // gündüz gökyüzü açık olduğu için sarı noktalar kayboluyor; renk temaya bağlı.
         // Daire yerine tam sayı kare: uzaklaştıkça sönen alfa kalır, yumuşak kenar gider.
-        ctx.fillStyle = "rgba(" + this.pal().aim + "," + (0.65 - dots * 0.07).toFixed(2) + ")";
+        ctx.fillStyle = "rgba(" + renk + "," + Math.max(0.15, taban - dots * 0.08).toFixed(2) + ")";
         ctx.fillRect(Math.round(x) - 2, Math.round(y) - 2, 4, 4);
       }
     }
@@ -601,13 +628,6 @@
 
   /* Raunt yazısı ve rüzgâr oku sahneden kaldırıldı: ikisi de canvas'ın hemen
      üstündeki skor şeridinde yazıyor. Sahnede yalnızca takım skorları kalır. */
-  GameView.prototype.drawHud = function () {
-    const ctx = this.ctx, p = this.pal();
-    PF.draw(ctx, this.teamLabel.red + ": " + this.scores.red, 6, 6, HUD_SCALE, p.teamHud.red);
-    PF.blit(ctx, this.teamLabel.blue + ": " + this.scores.blue, W - 6, 6,
-      HUD_SCALE, p.teamHud.blue, null, "right", "top");
-  };
-
   GameView.prototype.drawBoom = function () {
     const ctx = this.ctx, b = this.boom;
     if (!b || b.r <= 0) return;
@@ -676,7 +696,8 @@
       this.drawGorilla(g, this.arms[i] || 0, this.xeyes[i] ? "" : this.nameOfGorilla(i),
         { lying: !!this.lying[i], xeyes: !!this.xeyes[i] });
       if (this.bubble[i]) this.drawBubble(g.x, g.y, CURSE);
-      else if (this.away[i] && !g.dead) this.drawBubble(g.x, g.y, AFK);
+      // AFK etiketi ismin ustunde durur, ismi kapatmasin
+      else if (this.away[i] && !g.dead) this.drawBubble(g.x, g.y, AFK, 11);
     }
     if (!this.ban && !this.boom) this.drawAim();
     if (this.ban) {
@@ -686,13 +707,13 @@
     this.drawBoom();
     this.drawClouds();   // muzdan sonra: muz bulutların arkasından geçer
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    this.drawHud();      // skor sarsıntıya katılmaz
+    // Sahne ici skor yazisi kaldirildi: ayni bilgi canvasin hemen ustundeki
+    // tabelada kalin harflerle zaten var, sahnede ikinci kez gosterilmiyor.
   };
 
   /* ---------- atış canlandırması ---------- */
   GameView.prototype.playShot = function (msg, done) {
     if (!this.state) { if (done) done(); return; }
-    this.aim = null;
     const facing = core.facingOf(this.state, msg.shooter);
     this.arms[msg.shooter] = facing > 0 ? 2 : 1;
     this.ban = { frames: msg.frames, i: 0, impact: msg.impact, sunHit: msg.sunHit, sunPlayed: false };
@@ -799,8 +820,11 @@
     k.landed = true;
     this.cctx.drawImage(k.cut.cv, k.cut.x, Math.round(k.toY));
     core.pushEdit(this.state, { k: "m", spans: k.spans, dy: k.dy });
-    this.startShake(Math.min(1, k.dist / 90));
-    this.sound.thud();
+    /* Goril govdesinden kucuk moloz sahneyi sarsmaz; sesi de kisa ve hafif.
+       Kucucuk bir parca icin ekranin zipladigini gormek yanlis geliyordu. */
+    const buyuk = spanArea(k.spans) >= GW * GH;
+    if (buyuk) this.startShake(Math.min(1, k.dist / 90));
+    this.sound.thud(buyuk);
   };
 
   /* Kuyruktaki sıradaki zemin olayını başlatır: pikselleri O AN keser.
@@ -855,7 +879,7 @@
     this.paintTopple(t);
     core.pushEdit(this.state, { k: "t", from: t.from, to: t.to, px: t.px, py: t.py, ang: t.ang, dy: t.dy });
     this.startShake(1);
-    this.sound.thud();
+    this.sound.thud(true);
   };
 
   /* Devrilmiş yapıyı şehir tuvaline basar. Hem iniş anında hem de odaya
