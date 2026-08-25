@@ -4,11 +4,12 @@ Son güncelleme: 2026-08-25
 
 ## Durum
 
-Çalışıyor ve doğrulandı. `npm test` → 77/77 geçiyor. Tarayıcıda sınandı: oda
+Çalışıyor ve doğrulandı. `npm test` → 92/92 geçiyor. Tarayıcıda sınandı: oda
 kurma (şifreli), derin bağlantıyla katılma, sohbet, takım seçimi, 2'ye 2 ve
 4'e 4 maç, sıra devri, atış canlandırması, zemin tahribatı, canlı nişan
 yansıması, gündüz/gece teması, düşme canlandırması, kopma hâlinde hükmen sonuç,
-İngilizce/Türkçe dil değişimi ve sistem mesajlarının anahtardan çözülmesi.
+İngilizce/Türkçe dil değişimi, sistem mesajlarının anahtardan çözülmesi,
+kraterle ikiye ayrılan binanın çökmesi ve kamera sarsıntısı.
 
 Başlangıç noktası tek dosyalık `gorillas-1.html` idi; fizik ve çizim oradan
 korundu, ağ katmanı etrafına kuruldu.
@@ -70,7 +71,55 @@ bulutlar rüzgâr yönünde tam piksel adımlarıyla kayıyor ve artık güneşi
 dil listesinden ve saat diliminden seçiliyor; üst bardaki düğmeyle elle
 değiştirilebiliyor, seçim `localStorage`'da kalıyor.
 
+## Revize 3 (2026-08-25) — çöken binalar
+
+Krater bir binayı ikiye ayırdığında üst parça havada asılı kalıyordu. İki
+aşamada çözüldü.
+
+**Aşama 1 — zemin hücre ızgarasına taşındı.** Eski model (`binalar − kraterler`)
+"şu parça 40 piksel aşağı kaydı" cümlesini kuramıyordu. Zemin artık 2 piksellik
+hücrelerden oluşan bir `Uint8Array` (480×200, maç başına 94 KB).
+
+**Aşama 2 — kopma ve düşme.** Sokak seviyesinden yukarı taşma-doldurma yapılır,
+ulaşılamayan dolu hücreler kopmuş sayılır. Fizik motoru yok; gereken şey
+dinamik değil bağlantı analiziydi. Ölçülen maliyet: kopma taraması 1,4 ms,
+zemin oturtma 3,9 ms.
+
+Kamera sarsıntısı ve gümbürtü, parça yere değdiğinde tetiklenir.
+
 ## Mimari kararlar (ve nedenleri)
+
+**Zemin bir hücre ızgarasıdır, tek kural vardır.**
+BİR HÜCRE, MERKEZ PİKSELİ ŞEKLİN İÇİNDEYSE DOLUDUR. Bina da krater de aynı
+kuralı kullandığı için sunucu ile istemci aynı ızgaraya varır. Çözünürlük
+2 piksel; krater kenarındaki sapma en fazla 1 piksel.
+
+**Zemini yalnızca `pushEdit` değiştirir.** `state.edits` SIRALI bir günlüktür:
+`{k:"c",x,y,r}` krater açar, `{k:"m",spans,dy}` parça kaydırır. Sıra önemli —
+önce açılan krater ile önce kayan parça farklı zemin verir. Odaya sonradan
+giren bu günlüğü baştan oynatarak hem ızgarayı hem şehir görüntüsünü kurar.
+**Izgarayı doğrudan ellemeyin**, bayatlarsa iki tarayıcı farklı sonuç görür.
+
+**Şehir ölçüleri ızgaraya hizalıdır (`CELL` katında).** Hizasız olsalardı
+binanın son 1 piksellik sütunu hiçbir hücreye düşmez, kopan parça
+taşındığında o sütun havada asılı kalırdı — ekranda ince dikey çizgi olarak
+görüldü ve bu yüzden `makeCity` düzeltildi. Yeni ölçü eklerken `CELL` katında
+tutun.
+
+**Krater tuvalde de hücrelerle oyulur (`forEachCraterCell`).** Pürüzsüz daire
+çizilseydi tuval ile ızgara 1 piksel ayrışır, aynı artık-piksel sorunu
+kraterlerde tekrarlardı. Kenarın 2 piksellik basamaklı olması bilinçlidir ve
+piksel estetiğiyle uyumludur.
+
+**Kopan parça kuralları (kullanıcıyla kararlaştırıldı).**
+Parçayla birlikte inen goril mevcut "2 goril boyu" (`FATAL_FALL`) kuralına
+tabidir. Kafasına parça düşen goril ancak parça 2 goril boyundan yüksekten
+geldiyse ölür; daha kısa düşüşte molozun üstüne çıkarılır (taşın içinde
+gömülü kalmasın diye).
+
+**Parça ve goril aynı hızda (`FALL_STEP`) düşer.** Farklı hızda düşselerdi
+goril parçanın üstünde durmuyor gibi görünürdü. Sunucu sıradaki turu
+`settleDurationMs` dolmadan açmaz.
 
 **Sahne yazıları piksel fontla, kendi elimizle çizilir.**
 `ctx.fillText` hiçbir boyutta keskin çıkmıyor — Press Start 2P dahil, 8'in
@@ -113,11 +162,11 @@ Bu yüzden `simulateShot` kare kare `[x,y]` dizisi döndürür ve sunucu bunu
 yayınlar. **Bunu "optimizasyon" diye geri almayın** — istemci tarafı
 yeniden simülasyon senkron kaymasına yol açar.
 
-**Zemin canvas pikseli değil, geometri.**
+**Zemin canvas pikseli değil, veri.**
 Orijinal kod `getImageData` ile katı/boş testi yapıyordu; sunucuda canvas yok.
-Zemin artık `binalar (dikdörtgen) − kraterler (daire)` olarak modellendi
-(`shared/game-core.js: solid`). İki taraf da aynı sonucu verir; istemci ayrıca
-görsel için aynı daireleri `destination-out` ile oyar.
+Zemin önce `binalar (dikdörtgen) − kraterler (daire)` geometrisiyle, Revize 3'te
+ise hücre ızgarasıyla modellendi (`shared/game-core.js: solid` artık tek hücre
+sorgusu). Geometriye GERİ DÖNMEYİN: o model kayan parçaları ifade edemiyordu.
 
 **Şehir tohumdan üretilir.**
 Sunucu 32 bitlik tohumu yollar, iki taraf `mulberry32` ile aynı şehri kurar.
@@ -200,6 +249,22 @@ kuruyor, yoksa rüzgârı kapalı odalarda yoğunluk yanlış çıkardı.
 - **Piksel font önbelleği renge duyarlı.** `PixelFont.bitmap` anahtarında
   metin, ölçek, renk ve kontur var; tema değişince doğru bitmap üretilir.
   Önbellek 240 girdide en eskisini atar.
+- **Var olan bir sahnenin binalarını değiştirirseniz `rebuildGrid` çağırın.**
+  Izgara binalardan türüyor; `state.buildings` elle değiştirilip ızgara
+  bırakılırsa zemin eski şehri anlatmaya devam eder. Uçtan uca testte tam
+  bu tuzağa düşüldü, sahne sabitleyen iki test bu yüzden `rebuildGrid`
+  çağırıyor.
+- **`PixelFont` kalın kipi ölçek 1'de yok sayılır.** Harf gövdesi ve boşluğu
+  birer piksel; kalınlaştırmak boşluğu tamamen kapatıp yazıyı okunmaz yapardı
+  (`BOLD_MIN_SCALE`).
+- **Örtü yazısı sahne ölçeğiyle çarpılır.** Sahne canvas'ı 960 pikselden
+  kutuya sığdırılıyor; örtü 1:1 basılsaydı aynı font ölçeğinde bile sahnedeki
+  yazıdan büyük görünürdü. Yüzde vermek işe yaramaz, örtü kutusu içeriğe göre
+  daraldığı için yüzde kendi genişliğine döner.
+- **Muzun bina kenarına çarpması binayı çoğu zaman kesmez.** Binalar 32-60,
+  krater çapı 48-68 piksel; kopma için darca bir binanın ortasına yakın isabet
+  gerekiyor. Kopma testi yazarken kuleyi 24 piksel genişliğinde kurun, yoksa
+  parça kopmaz ve test yanıltıcı biçimde "kopma yok" der.
 
 ## Sıradaki adımlar (yapılmadı)
 
