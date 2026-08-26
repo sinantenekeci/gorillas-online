@@ -1,10 +1,10 @@
 # AI_HANDOFF — Gorillas Online
 
-Son güncelleme: 2026-08-25
+Son güncelleme: 2026-08-26
 
 ## Durum
 
-Çalışıyor ve doğrulandı. `npm test` → 123/123 geçiyor. Tarayıcıda sınandı: oda
+Çalışıyor ve doğrulandı. `npm test` → 127/127 geçiyor. Tarayıcıda sınandı: oda
 kurma (şifreli), derin bağlantıyla katılma, sohbet, takım seçimi, 2'ye 2 ve
 4'e 4 maç, sıra devri, atış canlandırması, zemin tahribatı, canlı nişan
 yansıması, gündüz/gece teması, düşme canlandırması, kopma hâlinde hükmen sonuç,
@@ -114,6 +114,29 @@ görünür sokağa çıkarıldı.
 
 **CPU rakip.** Bot odaya normal oyuncu gibi katılıyor; oda sahibi istediği
 takıma istediği zorlukta bot ekliyor.
+
+## Revize 6 (2026-08-26) — arayüz cilası ve botlu oda
+
+Sekiz maddelik tur, çoğu görünürlük hatası.
+
+**Geri sayım örtüsü.** "MAÇ BEKLENİYOR" ile "MAÇ BAŞLIYOR" üst üste biniyordu:
+örtü canvas'ın üstünde duruyor, sahne altta bekleme yazısını çizmeye devam
+ediyordu. Artık geri sayım başlar başlamaz sahne yazısı temizleniyor ve örtü,
+sayı bittiğinde değil `round` mesajı geldiğinde kapanıyor — arada bir karelik
+"bekleme yazısı geri geldi" görüntüsü bu yüzdendi. Maç başlamadan iptal
+edilirse (`roomState` maçsız gelirse) örtü kapatılıyor.
+
+**Bot oda sahibi olamaz.** Son insan çıkınca odada yalnız botlar kalıyor, oda
+sahipliği bota geçiyor ve maçı yalnızca sahip başlatabildiği için oyun bir
+daha hiç başlamıyordu. Son insan çıkınca oda tamamen kapanıyor.
+
+**Bot adı raundun başında yenilenir.** Önce `round` mesajı gönderilip sonra ad
+yenileniyordu; sahnede eski ad, sohbette yeni ad görünüyor ve "bir sonraki
+botun adı" gibi okunuyordu.
+
+**Nişan çizgisi görünürlüğü.** Sırasını bekleyen oyuncunun çizgisi zaten
+çiziliyordu ama 0.4 taban saydamlıkla açık gökyüzünde kayboluyordu. Taban
+0.62 (sırası gelende 0.85), alt sınır 0.30.
 
 ## Mimari kararlar (ve nedenleri)
 
@@ -379,14 +402,27 @@ kuruyor, yoksa rüzgârı kapalı odalarda yoğunluk yanlış çıkardı.
   gerekiyor. Kopma testi yazarken kuleyi 24 piksel genişliğinde kurun, yoksa
   parça kopmaz ve test yanıltıcı biçimde "kopma yok" der.
 
+- **`uniqueName` kişinin KENDİ adını çakışma saymamalı.** İstemci her açılışta
+  `rename` yolluyor; kendi adı da "alınmış" sayılınca her yeniden bağlanmada
+  sonek ekleniyordu (`Goril` → `Goril(2)` → `Goril(2)(2)`). Çağıranların
+  hepsi kendi istemcisini `self` olarak geçmek zorunda.
+- **Bulutun iki yanı da her sırada en az bir hücre daralmalı.** Daralma
+  0'dan başlarsa üst üste aynı hizada başlayan sıralar çıkıyor, bulut dik bir
+  duvarla bitip "kesilmiş/yarım" görünüyordu. Bulut genişliği de bu yüzden
+  12-18 hücreye çıkarıldı: dar bulutta basamaklar tek sıraya iniyordu.
+- **Örtü ile sahne yazısı iki ayrı katman.** İkisi aynı anda doluysa üst üste
+  binerler. Örtüyü açan her yol `view.idleText`'i temizlemeli, kapatan her
+  yol geri koymalı.
+- **Açılır listenin (`select`) açılmış hâli işletim sistemine aittir.**
+  `option` öğelerine piksel font verildi ama Windows/Chrome listeyi kendi
+  çizdiği için font uygulanmayabilir; tarayıcıdan doğrulanamaz.
+
 ## Sıradaki adımlar (yapılmadı)
 
 - Mobilde sohbet oyunun çok altında kalıyor; sekmeli (oyun/sohbet) düzen
   değerlendirilebilir. Saha 960 piksele çıktığı için telefonda daha da küçüldü.
 - Odaya maç ortasında giren izleyici, süren atışın canlandırmasını görmez;
   yalnızca sonucu görür.
-- Maç ortasında bağlantısı kopup dönen oyuncu izleyici olarak geri geliyor ve
-  gorili ölü kalıyor. Bilinçli (kopma = eleme) ama sinir bozucu olabilir.
 - Takım arkadaşını vurmak serbest; dost ateşi engellenmiyor.
 - Kalıcı istatistik/liderlik tablosu yok (bilinçli tercih: hesapsız yapı).
 - Ses yalnızca tarayıcı etkileşiminden sonra açılıyor (autoplay politikası);
