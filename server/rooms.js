@@ -385,6 +385,10 @@ class Hub {
       id: "bot-" + crypto.randomUUID(),
       name: bots.randomName(),
       isBot: true,
+      /* Odaya katildigi ad ILK RAUNTTA da gecerlidir; asagidaki bayrak o
+         rauntta yeniden adlandirmayi atlatir. Sohbete "X odaya katildi"
+         yazip sahada Y adiyla oynasaydi ad hemen tutarsiz olurdu. */
+      yeniAd: true,
       level: level,
       shots: 0,
       timer: null,
@@ -527,8 +531,13 @@ class Hub {
     });
 
     /* Botlar adlarini raundun BASINDA yeniler: sonra yenileselerdi "round"
-       mesaji eski adla gidip sahnede eski ad, sohbette yeni ad gorunurdu. */
-    room.members.forEach((c) => { if (c.isBot) this.renameBot(c, true); });
+       mesaji eski adla gidip sahnede eski ad, sohbette yeni ad gorunurdu.
+       Yeni eklenen bot ilk raundu KATILDIGI adla oynar. */
+    room.members.forEach((c) => {
+      if (!c.isBot) return;
+      if (c.yeniAd) { c.yeniAd = false; return; }
+      this.renameBot(c, true);
+    });
 
     /* Goril dizisi önce kırmızıları sonra mavileri içerir; oyuncular aynı
        sırayla eşleşir. Sıra düzeni takımlar arasında dönüşümlüdür. */

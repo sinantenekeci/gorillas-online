@@ -375,6 +375,11 @@ kuruyor, yoksa rüzgârı kapalı odalarda yoğunluk yanlış çıkardı.
   "boşlukta patlayan muz" olarak görür.** Bu sınıf hata iki kez yaşandı
   (1 piksel hizalama, sonra maske). Şüphelenince tarayıcı konsolundan
   `view.terrainMismatch()` çağırın; sıfır dönmeli.
+- **Odaya yeni eklenen bot ILK raundu katıldığı adla oynar.** Sohbete
+  "X odaya katıldı" yazılıyor; ilk raunt başında yeniden adlandırılsaydı
+  sahnede Y görünürdü ve oda yeni kurulup maç ilk kez başlatıldığında tam
+  bu yaşandı. `addBot` `yeniAd` bayrağını koyuyor, `startRound` o raundu
+  atlayıp bayrağı düşürüyor.
 - **Bot adı her raunt değişir ve duyurulmaz.** Sohbeti şişirmesin diye ad
   değişikliği sistem mesajı üretmez; `match.players` içindeki ad da
   güncellenir, yoksa sahnede eski ad kalır.

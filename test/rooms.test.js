@@ -779,6 +779,13 @@ test("botun adı her raunt değişir", async () => {
 
   const room = hub.rooms.get(id);
   const bot = room.members.find((m) => m.isBot);
+  /* Bot ilk raundu, sohbete "... odaya katildi" diye yazilan adiyla oynamali:
+     oda yeni kurulup mac ilk kez baslatildiginda sahnedeki ad ile sohbetteki
+     ad farkli cikiyordu. */
+  const katilma = a.all("chat").find((s) => s.key === "sys.botJoined");
+  assert.strictEqual(katilma.params.name, bot.name,
+    "bot ilk raundu odaya katildigi adla oynamali");
+
   const adlar = new Set();
   for (let i = 0; i < 12; i++) {
     a.clear();
