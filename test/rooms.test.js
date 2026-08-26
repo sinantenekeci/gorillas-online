@@ -781,11 +781,72 @@ test("botun adı her raunt değişir", async () => {
   const bot = room.members.find((m) => m.isBot);
   const adlar = new Set();
   for (let i = 0; i < 12; i++) {
-    hub.botReceive(bot, { t: "round" });
+    a.clear();
+    hub.startRound(room);
+    const raunt = a.last("round");
+    const p = raunt.players.find((x) => x.id === bot.id);
+    /* Ad raundun BAŞINDA yenilenmeli. Önceden "round" mesajı gidince
+       yenileniyordu; sahnede eski ad, sohbette yeni ad görünüyordu. */
+    assert.strictEqual(p.name, bot.name, "raunt mesajı güncel adı taşımalı");
+    assert.strictEqual(room.match.players.find((x) => x.id === bot.id).name, bot.name,
+      "maç kaydındaki ad da aynı olmalı");
     adlar.add(bot.name);
   }
   assert.ok(adlar.size > 1, "ad raunttan raunda değişmeli, görülen: " + adlar.size);
-  // maçtaki oyuncu kaydı da güncellenmeli, yoksa sahnede eski ad kalır
-  const p = room.match.players.find((x) => x.id === bot.id);
-  assert.strictEqual(p.name, bot.name, "maç kaydındaki ad da güncellenmeli");
+});
+
+/* Bot oda sahibi olamaz: maçı yalnızca sahip başlatabildiği için botun sahip
+   olduğu odada oyun hiç başlamıyordu. Odada insan kalmazsa oda kapanır. */
+test("son insan çıkınca botlu oda kapanır", () => {
+  const hub = mkHub();
+  const a = mkClient(hub, "Tek");
+  hub.handle(a.id, { t: "create", name: "Botlu" });
+  const id = a.last("joined").roomId;
+  hub.handle(a.id, { t: "addbot", team: "blue" });
+  hub.handle(a.id, { t: "addbot", team: "red" });
+  assert.strictEqual(hub.rooms.get(id).members.length, 3);
+
+  hub.handle(a.id, { t: "leave" });
+  assert.ok(!hub.rooms.has(id), "insan kalmayınca oda silinmeli");
+  assert.strictEqual([...hub.clients.values()].filter((c) => c.isBot).length, 0,
+    "botlar da temizlenmeli");
+});
+
+test("oda sahipliği bota değil insana geçer", () => {
+  const hub = mkHub();
+  const a = mkClient(hub, "Sahip");
+  hub.handle(a.id, { t: "create", name: "Devir" });
+  const id = a.last("joined").roomId;
+  hub.handle(a.id, { t: "addbot", team: "blue" });
+  const b = mkClient(hub, "Ikinci");
+  hub.handle(b.id, { t: "join", roomId: id });
+
+  hub.handle(a.id, { t: "leave" });
+  const room = hub.rooms.get(id);
+  assert.ok(room, "oda durmalı");
+  assert.strictEqual(room.hostId, b.id, "sahiplik insana geçmeli");
+  const yeniSahip = room.members.find((m) => m.id === room.hostId);
+  assert.strictEqual(!!yeniSahip.isBot, false, "oda sahibi bot olmamalı");
+});
+
+/* Istemci her baglantida rename yolluyor. Kisinin KENDI adi cakisma sayilirsa
+   her seferinde sonek eklenir ve ad "Goril(2)(2)(2)" diye buyur. */
+test("aynı adla yeniden adlandırmak isme sonek eklemez", () => {
+  const hub = mkHub();
+  const a = mkClient(hub, "Goril");
+  hub.handle(a.id, { t: "create", name: "Ad" });
+  for (let i = 0; i < 5; i++) hub.handle(a.id, { t: "rename", name: "Goril" });
+  assert.strictEqual(a.name, "Goril", "ad büyümemeli, görülen: " + a.name);
+});
+
+test("başkasının adıyla çakışınca sonek eklenir", () => {
+  const hub = mkHub();
+  const a = mkClient(hub, "Goril");
+  hub.handle(a.id, { t: "create", name: "Ad" });
+  const id = a.last("joined").roomId;
+  const b = mkClient(hub, "Goril");
+  hub.handle(b.id, { t: "join", roomId: id });
+  assert.strictEqual(a.name, "Goril");
+  assert.notStrictEqual(b.name, "Goril", "ikinci Goril ayırt edilmeli");
+  assert.ok(b.name.indexOf("Goril") === 0);
 });

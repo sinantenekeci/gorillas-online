@@ -587,7 +587,7 @@
      birden çok nişan çizgisi olabilir. Hangisinin kim olduğu anlaşılsın diye
      noktalar takım rengini alır; sırası gelen oyuncunun çizgisi daha parlak
      ve daha uzun çizilir. */
-  const AIM_DOTS_TURN = 6, AIM_DOTS_IDLE = 4;
+  const AIM_DOTS_TURN = 6, AIM_DOTS_IDLE = 5;
 
   GameView.prototype.drawAim = function () {
     for (const key in this.aims) {
@@ -609,7 +609,10 @@
     const m = core.muzzle(this.state, shooter);
     const renk = this.pal().aimTeam[g.team] || this.pal().aim;
     const enFazla = aktif ? AIM_DOTS_TURN : AIM_DOTS_IDLE;
-    const taban = aktif ? 0.75 : 0.4;
+    /* Bekleyen oyuncunun cizgisi de rahat gorulmeli: onceki degerlerde
+       (0.4 taban, hizli sonme) acik gokyuzunde neredeyse kayboluyordu ve
+       "cizgim gorunmuyor" diye bildirildi. */
+    const taban = aktif ? 0.85 : 0.62;
     let px = m.x, py = m.y, run = 0, dots = 0, t = 0;
     while (dots < enFazla && t < 12) {
       t += 0.004;
@@ -620,7 +623,7 @@
       if (run >= 17) {
         run = 0; dots++;
         // Daire yerine tam sayı kare: uzaklaştıkça sönen alfa kalır, yumuşak kenar gider.
-        ctx.fillStyle = "rgba(" + renk + "," + Math.max(0.15, taban - dots * 0.08).toFixed(2) + ")";
+        ctx.fillStyle = "rgba(" + renk + "," + Math.max(0.3, taban - dots * 0.07).toFixed(2) + ")";
         ctx.fillRect(Math.round(x) - 2, Math.round(y) - 2, 4, 4);
       }
     }

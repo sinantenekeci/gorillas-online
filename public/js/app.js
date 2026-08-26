@@ -430,6 +430,8 @@
     } else if (!m.match && view.state && phase !== "matchover") {
       setIdle("scene.waitingMatch");
     }
+    // mac baslamadan iptal olduysa geri sayim ortusu asili kalmasin
+    if (!m.match && countdownIv) cancelCountdown();
     renderRoom();
   });
 
@@ -583,17 +585,32 @@
   });
 
   /* ---------- maç olayları ---------- */
+  /* Geri sayım sırasında sahnedeki "MAÇ BEKLENİYOR" yazısı gizlenir: örtü
+     canvas'ın üstünde durduğu için ikisi üst üste biniyordu. Örtü, sayı
+     bitince değil RAUNT MESAJI gelince kapanır; yoksa arada bir kare boyunca
+     yine bekleme yazısı görünüp kayboluyordu. */
+  let countdownIv = 0;
   net.on("countdown", (m) => {
     let n = m.seconds;
-    overlay(() => ({ title: t("scene.countdown"), text: n + "…" }));
-    const iv = setInterval(() => {
+    view.idleText = "";
+    clearInterval(countdownIv);
+    overlay(() => ({ title: t("scene.countdown"), text: n > 0 ? n + "…" : "" }));
+    countdownIv = setInterval(() => {
       n--;
-      if (n <= 0) { clearInterval(iv); hideOverlay(); }
-      else redrawOverlay();
+      redrawOverlay();
+      if (n <= 0) { clearInterval(countdownIv); countdownIv = 0; }
     }, 1000);
   });
 
+  /* Maç başlamadan iptal olursa (takım boşalırsa) örtü asılı kalmasın. */
+  function cancelCountdown() {
+    if (countdownIv) { clearInterval(countdownIv); countdownIv = 0; }
+    if (!view.state) view.idleText = t(idleKey);
+    hideOverlay();
+  }
+
   net.on("round", (m) => {
+    if (countdownIv) { clearInterval(countdownIv); countdownIv = 0; }
     hideOverlay();
     view.setRound(m);
     // Maç sunucuda "round" ile başlar; oda durumu ayrıca gelmediği için

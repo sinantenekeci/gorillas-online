@@ -294,9 +294,12 @@ class Hub {
     this.joinRoom(client, room, false);
   }
 
-  uniqueName(room, name) {
+  /* Kisinin KENDI adi cakisma sayilmaz. Sayilsaydi, ayni adla yeniden
+     adlandirmak her seferinde sonek ekler ve yeniden baglanan oyuncunun adi
+     "Goril(2)(2)(2)" diye buyurdu — istemci her acilista rename yolluyor. */
+  uniqueName(room, name, self) {
     let candidate = name, n = 2;
-    const taken = new Set(room.members.map((m) => m.name));
+    const taken = new Set(room.members.filter((m) => m !== self).map((m) => m.name));
     while (taken.has(candidate)) candidate = name.slice(0, MAX_NAME - 3) + "(" + (n++) + ")";
     return candidate;
   }
@@ -304,7 +307,7 @@ class Hub {
   /* Yeni gelen, boş yeri olan takıma otomatik yerleşir; maç sürüyorsa izleyici
      kalır. Böylece odaya ilk giren iki kişi düğmeye basmadan oynayabilir. */
   joinRoom(client, room, asHost) {
-    client.name = this.uniqueName(room, client.name);
+    client.name = this.uniqueName(room, client.name, client);
     client.roomId = room.id;
     client.team = null;
     room.members.push(client);
@@ -331,7 +334,19 @@ class Hub {
     if (!room) { if (!silent) this.send(client, { t: "left" }); return; }
 
     room.members = room.members.filter((m) => m.id !== client.id);
-    if (room.hostId === client.id && room.members.length) room.hostId = room.members[0].id;
+
+    /* Odada insan kalmadiysa oda kapanir. Bot oda sahibi olamaz: maci
+       yalnizca sahip baslatabildigi icin botun sahip oldugu odada oyun hic
+       baslamiyordu. */
+    const insanlar = room.members.filter((m) => !m.isBot);
+    if (!insanlar.length) {
+      this.stopTimer(room);
+      if (room.absentTimer) { this.clearTimeout(room.absentTimer); room.absentTimer = null; }
+      room.members.forEach((m) => { this.clearBotTimer(m); this.clients.delete(m.id); });
+      room.members.length = 0;
+    } else if (room.hostId === client.id) {
+      room.hostId = insanlar[0].id;
+    }
 
     if (!room.members.length) {
       this.stopTimer(room);
@@ -376,7 +391,7 @@ class Hub {
       send(m) { hub.botReceive(bot, m); }
     };
     this.addClient(bot);
-    bot.name = this.uniqueName(room, bot.name);
+    bot.name = this.uniqueName(room, bot.name, bot);
     bot.roomId = room.id;
     bot.team = team;
     room.members.push(bot);
@@ -389,8 +404,7 @@ class Hub {
      değişir, atış sayacı sıfırlanır) ve sıra (planla, düşün, at). */
   botReceive(bot, m) {
     if (m.t === "round") {
-      bot.shots = 0;
-      this.renameBot(bot);
+      bot.shots = 0;          // ad zaten startRound icinde yenilendi
       return;
     }
     if (m.t !== "turn") return;
@@ -424,15 +438,15 @@ class Hub {
 
   /* Bot her raunt yeni bir çizgi film adı alır; sohbeti şişirmesin diye
      ad değişikliği duyurulmaz. */
-  renameBot(bot) {
+  renameBot(bot, sessiz) {
     const room = this.rooms.get(bot.roomId);
     if (!room) return;
-    bot.name = this.uniqueName(room, bots.randomName());
-    if (room.match) {
+    bot.name = this.uniqueName(room, bots.randomName(), bot);
+    if (room.match && room.match.players) {
       const p = room.match.players.find((x) => x.id === bot.id);
       if (p) p.name = bot.name;
     }
-    this.pushRoomState(room);
+    if (!sessiz) this.pushRoomState(room);
   }
 
   clearBotTimer(bot) {
@@ -511,6 +525,10 @@ class Hub {
       red: red.length,
       blue: blue.length
     });
+
+    /* Botlar adlarini raundun BASINDA yeniler: sonra yenileselerdi "round"
+       mesaji eski adla gidip sahnede eski ad, sohbette yeni ad gorunurdu. */
+    room.members.forEach((c) => { if (c.isBot) this.renameBot(c, true); });
 
     /* Goril dizisi önce kırmızıları sonra mavileri içerir; oyuncular aynı
        sırayla eşleşir. Sıra düzeni takımlar arasında dönüşümlüdür. */
@@ -837,7 +855,7 @@ class Hub {
     if (!name) return;
     const room = this.rooms.get(client.roomId);
     const old = client.name;
-    client.name = room ? this.uniqueName(room, name) : name;
+    client.name = room ? this.uniqueName(room, name, client) : name;
     this.send(client, { t: "welcome", id: client.id, name: client.name });
     if (room) {
       // yeniden baglanmada ayni ad geliyor; degismediyse duyurmaya gerek yok

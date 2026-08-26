@@ -164,13 +164,16 @@
   var CLOUD_TOP = 16, CLOUD_BOTTOM = 100, CLOUD_CELL = 4;
 
   function oneCloud(rnd) {
-    var wc = 9 + Math.floor(rnd() * 7);              // 9..15 hücre = 36..60 px
+    var wc = 12 + Math.floor(rnd() * 7);             // 12..18 hücre = 48..72 px
     var rows = 3 + Math.floor(rnd() * 2);            // 3..4 sıra
     var bars = [], l = 0, r = wc, k;
     for (k = 0; k < rows; k++) {
       bars.push({ l: l, r: r });
-      l += Math.floor(rnd() * 3);                    // her sıra soldan 0..2,
-      r -= 1 + Math.floor(rnd() * 2);                // sağdan 1..2 hücre daralır
+      /* Iki yan da EN AZ bir hucre daralmali. Sol taraf 0 daralabildigi icin
+         ust uste ayni hizada baslayan siralar cikiyor ve bulut dik bir duvarla
+         bitmis, yani kesilmis gibi gorunuyordu. */
+      l += 1 + Math.floor(rnd() * 2);                // soldan 1..2,
+      r -= 1 + Math.floor(rnd() * 2);                // sagdan 1..2 hucre daralir
       if (r - l < 2) break;
     }
     // tepedeki ikinci tümsek: referanstaki çift kamburlu siluet buradan gelir
