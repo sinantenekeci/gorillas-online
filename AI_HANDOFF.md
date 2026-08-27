@@ -1,6 +1,6 @@
 # AI_HANDOFF — Gorillas Online
 
-Son güncelleme: 2026-08-26
+Son güncelleme: 2026-08-27
 
 ## Durum
 
@@ -422,10 +422,119 @@ kuruyor, yoksa rüzgârı kapalı odalarda yoğunluk yanlış çıkardı.
   `option` öğelerine piksel font verildi ama Windows/Chrome listeyi kendi
   çizdiği için font uygulanmayabilir; tarayıcıdan doğrulanamaz.
 
+## Sıradaki oturum: mobil oynanabilirlik (planlandı 2026-08-27, başlangıç 2026-08-29)
+
+Bir sonraki oturumun İLK işi bu. Sinan oyunu telefondan ve tabletten
+açtığında sahnenin ekrana sığmadığını, kaydırıcıları ayarlayıp muzu attıktan
+sonra sonucu görmek için sayfayı kaydırmak zorunda kaldığını, ayrıca ekranın
+sağında ve solunda boşluk kaldığını bildirdi. Aşağıdaki teşhis 2026-08-27'de
+kod okunarak çıkarıldı; henüz hiçbir satır değiştirilmedi.
+
+### Teşhis — dört kök neden
+
+1. **Oda düzeninin yükseklik farkındalığı yalnızca masaüstünde var.**
+   "Sahneyi ekran yüksekliğine sığdır" kuralı (`public/css/style.css`,
+   `.room__main` içindeki `max-width: min(100%, max(560px, calc((100dvh -
+   450px) * 2.4)))`) `@media (min-width: 1024px)` bloğunun içinde. Bunun
+   altında düzen tek sütuna düşüyor ve sahne `.stage canvas { width: 100% }`
+   ile ekranın tamamını kaplıyor. Sahne 960×400, yani 2.4:1; 750 piksel
+   genişlikte 312 piksel yükseklik ister. Üst bar, oda başlığı, skor tablosu
+   ve kaydırıcı paneli eklenince yatay bir telefonun 390 piksellik yüksekliği
+   ikiye katlanıyor. Kaydırma zorunluluğunun sebebi budur.
+2. **Kenarlardaki boşluk çentik güvenli alanıdır.** `public/index.html`
+   içindeki viewport etiketinde `viewport-fit=cover` yok. iOS Safari yatay
+   modda, bu değer olmadan sayfayı çentiğin iki yanından içeri çeker.
+3. **Küçük ekran için tek kırılma noktası var** (`@media (max-width: 520px)`)
+   ve yalnızca lobi listesiyle yazı boyutlarına dokunuyor; maç ekranına
+   hiç dokunmuyor.
+4. **Maç sırasında ekranı harcayan öğeler gizlenmiyor.** Sohbet, takım
+   listeleri, üst bar ve oda başlığı sıra oyuncudayken de duruyor.
+   Masaüstünde maliyeti yok, yatay telefonda ekranın yarısını yiyor.
+
+### Kararlaştırılan yol
+
+Düzen genişliğe değil YÜKSEKLİĞE göre kurulacak:
+
+- Sahne `height` üzerinden ölçeklenecek, genişlik en-boy oranından türeyecek.
+  2.4:1 oran yatay telefona zaten iyi oturuyor (iPhone 14 yatayda 2.16:1);
+  ekranın tamamı sahneye ayrıldığında rahat sığıyor.
+- Sıra oyuncuya geldiğinde devreye giren bir "maç modu": üst bar, oda başlığı
+  ve yan panel gizlenir; açı/hız kaydırıcıları ile ateş düğmesi sahnenin
+  üzerine yarı saydam ince bir şerit olarak biner. Sohbet ve takımlar bir
+  düğmeyle açılan çekmeceye taşınır.
+- `viewport-fit=cover` ve `env(safe-area-inset-*)` ile çentik boşlukları
+  kapatılır.
+- Dikey modda "telefonu yan çevir" uyarısı. 2.4:1 bir sahneyi dikey ekrana
+  sığdırmanın anlamlı bir yolu yok; kullanıcıyı yönlendirmek en dürüst çözüm.
+
+Tahmini süre: birkaç saat.
+
+### Ayrı kapsam olarak önerildi (henüz onaylanmadı)
+
+**Canvas üzerinde parmakla sürükleyerek nişan alma.** Gorilden başlayıp
+geriye çekilen sürükleme vektörü açı ve hızı birlikte verir (Angry Birds
+mantığı); kaydırıcılar yedek olarak kalır. Mobil oynanışı kaydırıcılardan
+belirgin biçimde iyileştirecek tek değişiklik, ama düzen işinden ayrı bir
+kapsam. Sinan'a ayrıca sorulacak.
+
+### Mobil sürüm kararı: YEREL YENİDEN YAZIM YAPILMAYACAK
+
+Sinan "mobil sürüm mü yapsak" diye sordu; verilen cevap ve gerekçesi:
+
+- **PWA (önerilen ilk adım).** Manifest ve `display: fullscreen` ile oyun ana
+  ekrana eklenir, kendi ikonuyla tarayıcı çubuğu olmadan açılır. Mağaza yok,
+  inceleme yok, oyun kodunda değişiklik yok. Düzen işiyle birlikte ~1 gün.
+- **Capacitor sarmalayıcı (mağaza isteniyorsa).** Aynı web kodunu yerel
+  kabuğa koyar, APK/IPA üretir; oyun kodunda tek satır değişmez. Uzun taraf
+  mağaza hesapları, imzalama ve inceleme; kod tarafı ~1 gün.
+- **Unity/Godot/React Native ile yeniden yazım: HAYIR.** `shared/game-core.js`
+  içindeki fizik, hücre ızgaralı zemin, kopma ve devrilme analizi baştan
+  yazılacaktı — altı revize boyunca ayıklanmış, çalışan kod. Karşılığında
+  oynanış kazancı sıfır: oyun zaten canvas + WebSocket, ikisi de mobil
+  tarayıcıda yerel hızda çalışıyor. Üstelik çok oyunculu olduğu için
+  sunucudan da kurtulunmuyor. Bu karar bir daha açılmasın diye buraya yazıldı.
+
+### Sunucu tarafı (mobil bağlamında)
+
+Sunucu açısından mobil istemci ile masaüstü tarayıcı arasında fark yok; ikisi
+de aynı WebSocket'e bağlanır. Üç not:
+
+- **Asıl sorun uyku.** Ücretsiz plan 15 dakika trafik almazsa uyuyor, ilk
+  istek 30-60 saniye sürüyor. Web sayfasında tolere edilebilir; uygulama
+  ikonuna dokunup bir dakika boş ekrana bakmak kullanıcıyı kaybettirir.
+  Yayına çıkılacaksa Render Starter planı (aylık 7 dolar) uykuyu kaldırıyor
+  ve tek başına sorunu bitiriyor. `/health` ucunu dışarıdan zamanlayıcıyla
+  dürtmek aylık örnek saati sınırını yakar; kalıcı çözüm değil.
+- **Kapasite muhtemelen sorun değil ama ÖLÇÜLMEDİ.** Oyun sıra tabanlı,
+  mesajlar küçük, maç başına bellek 94 KB. 512 MB'ın darboğaz olması zor.
+  Yine de "kaç eşzamanlı oda kaldırır" sorusu tahminle cevaplanmamalı;
+  yayından önce yapay istemcilerle yük testi gerekir.
+- **Tavan yatay ölçeklenmede.** Tüm durum tek süreçte bellekte; ikinci bir
+  örnek açılamaz, iki örnek birbirinin odalarını görmez. Büyürse odaları
+  örneklere sabitleyen yönlendirme katmanı veya paylaşılan durum deposu
+  gerekir. Bugün sorun değil.
+
+Mobil için en kritik sunucu işi Revize 5'te zaten yapıldı: kalıcı jetonla
+yeniden bağlanma. Telefon uygulamayı arka plana attığında soket kopar; o
+mekanizma olmasa mobilde oyun kullanılamazdı.
+
+### Bekleyen hata bildirimleri (ekran görüntüsü gelecek)
+
+Sinan üç hatanın hâlâ arasıra yaşandığını bildirdi ve ekran görüntülerini
+peyder pey göndereceğini söyledi. Görüntü gelmeden tahminle düzeltme
+yapılmayacak:
+
+- Bina içinde muz patlaması (yukarıdaki "boşlukta patlayan muz" tuzağına
+  bakın; `view.terrainMismatch()` sıfır dönmeli).
+- Gorilin üzerine düşen molozun gorili öldürmemesi.
+- Gorilin havada asılı kalması.
+
 ## Sıradaki adımlar (yapılmadı)
 
-- Mobilde sohbet oyunun çok altında kalıyor; sekmeli (oyun/sohbet) düzen
-  değerlendirilebilir. Saha 960 piksele çıktığı için telefonda daha da küçüldü.
+- **SIRADAKİ İŞ: mobil oynanabilirlik.** Telefonda ve tablette sahne ekrana
+  sığmıyor, sohbet oyunun çok altında kalıyor. Teşhis, kararlaştırılan yol ve
+  mobil sürüm kararı için yukarıdaki "Sıradaki oturum: mobil oynanabilirlik"
+  bölümüne bakın.
 - Odaya maç ortasında giren izleyici, süren atışın canlandırmasını görmez;
   yalnızca sonucu görür.
 - Takım arkadaşını vurmak serbest; dost ateşi engellenmiyor.
