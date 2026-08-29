@@ -920,21 +920,39 @@
      Böylece küçük ekranda tek hareketle ulaşılamayan değerlere art arda
      hareketlerle çıkılabiliyor.
 
+     Her sürükleme TEK EKSENE kilitlenir. İki eksen birden açık olduğunda
+     dikey giderken kaçınılmaz olarak biriken birkaç piksellik yatay kayma
+     hızı da değiştiriyordu; eksen ilk anlamlı hareketle seçilip sürükleme
+     bitene kadar sabit kalıyor. Ekseni değiştirmek için parmağı kaldırıp
+     yeniden sürüklemek yeterli.
+
      Duyarlılık ekran pikseli cinsinden sabit; sahne ölçüsüne bağlanmadı ki
      aynı hareket her cihazda aynı miktarı değiştirsin. */
   const ACI_PIKSEL = 3;      // bir derece icin kac ekran pikseli
   const HIZ_PIKSEL = 2;      // bir hiz birimi icin kac ekran pikseli
+  const EKSEN_ESIK = 8;      // bu kadar piksel hareketten sonra eksen kilitlenir
 
   /* Kesirli birikim ayrı tutuluyor: yavaş sürüklemede her olayda
      yuvarlansaydı adımlar sıfıra yuvarlanıp hareket kaybolurdu. */
-  let birikAci = 45, birikHiz = 50, sonX = 0, sonY = 0;
+  let birikAci = 45, birikHiz = 50;
+  let baslaX = 0, baslaY = 0, sonX = 0, sonY = 0, eksen = null;
 
   function nisanla(ev) {
     if (!inMatch() || !view.state) return;
     const g = view.state.gorillas[myGorilla];
     if (!g || g.dead) return;
-    birikAci = GorillasCore.aimStep(birikAci, sonY - ev.clientY, ACI_PIKSEL, 0, 90);
-    birikHiz = GorillasCore.aimStep(birikHiz, ev.clientX - sonX, HIZ_PIKSEL, 1, 200);
+    if (!eksen) {
+      eksen = GorillasCore.aimAxis(ev.clientX - baslaX, ev.clientY - baslaY, EKSEN_ESIK);
+      if (!eksen) return;                 // henüz yön belli değil, bekle
+      /* Eşiğe kadar biriken hareket kaybolmasın: ölçüm başlangıç
+         noktasından devam eder. */
+      sonX = baslaX; sonY = baslaY;
+    }
+    if (eksen === "aci") {
+      birikAci = GorillasCore.aimStep(birikAci, sonY - ev.clientY, ACI_PIKSEL, 0, 90);
+    } else {
+      birikHiz = GorillasCore.aimStep(birikHiz, ev.clientX - sonX, HIZ_PIKSEL, 1, 200);
+    }
     sonX = ev.clientX; sonY = ev.clientY;
     el.ang.value = Math.round(birikAci);
     el.vel.value = Math.round(birikHiz);
@@ -963,7 +981,9 @@
        başlar. Yanlışlıkla sahneye dokunmak nişanı bozmasın diye. */
     birikAci = +el.ang.value;
     birikHiz = +el.vel.value;
-    sonX = e.clientX; sonY = e.clientY;
+    baslaX = sonX = e.clientX;
+    baslaY = sonY = e.clientY;
+    eksen = null;
   });
   el.canvas.addEventListener("pointermove", (e) => {
     if (nisanParmak !== e.pointerId) return;
@@ -973,6 +993,7 @@
   const nisanBirak = (e) => {
     if (nisanParmak !== e.pointerId) return;
     nisanParmak = null;
+    eksen = null;
     if (el.canvas.hasPointerCapture(e.pointerId)) el.canvas.releasePointerCapture(e.pointerId);
   };
   el.canvas.addEventListener("pointerup", nisanBirak);

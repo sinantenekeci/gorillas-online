@@ -777,6 +777,21 @@ test("adım sınırda kırpılır ve sınır yapışkan değildir", () => {
   assert.strictEqual(core.aimStep(alt, 4, 2, 1, 200), 3);
 });
 
+test("sürükleme tek eksene kilitlenir", () => {
+  /* Çapraz harekette açı ve hızın birlikte oynaması istenmiyor: dikey
+     sürüklerken biriken birkaç piksellik yatay kayma hızı da değiştiriyordu. */
+  assert.strictEqual(core.aimAxis(40, 6, 8), "hiz", "baskın yatay");
+  assert.strictEqual(core.aimAxis(6, 40, 8), "aci", "baskın dikey");
+  assert.strictEqual(core.aimAxis(-40, 6, 8), "hiz", "yön değil, büyüklük");
+  assert.strictEqual(core.aimAxis(6, -40, 8), "aci");
+  /* Eşiğin altında karar YOK; erken karar parmağın ilk titremesine takılır. */
+  assert.strictEqual(core.aimAxis(7, 7, 8), null);
+  assert.strictEqual(core.aimAxis(0, 0, 8), null);
+  assert.strictEqual(core.aimAxis(8, 0, 8), "hiz", "eşiğe değince karar verilir");
+  /* Eşitlikte belirlenimci olmalı: aynı hareket hep aynı ekseni versin. */
+  assert.strictEqual(core.aimAxis(30, 30, 8), "aci");
+});
+
 test("art arda sürüklemeler birikir", () => {
   /* Parmak kaldırılıp yeniden sürüklenince değer kaldığı yerden devam eder;
      küçük ekranda tek harekette ulaşılamayan değere böyle çıkılıyor. */

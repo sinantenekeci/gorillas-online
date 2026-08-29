@@ -711,6 +711,14 @@ Küçük ekranda tek harekette ulaşılamayan değerlere böyle çıkılıyor.
 - `pointerdown` artık değeri DEĞİŞTİRMEZ, yalnızca birikimi o anki
   kaydırıcı değerinden başlatır; sahneye yanlışlıkla dokunmak nişanı
   bozmuyor.
+- **Her sürükleme TEK EKSENE kilitlenir** (`GorillasCore.aimAxis`, eşik 8
+  piksel). İki eksen birden açıkken dikey sürüklerken kaçınılmaz olarak
+  biriken birkaç piksellik yatay kayma hızı da değiştiriyordu; Sinan
+  bunu bildirdi ve çapraz etki kaldırıldı. Eksen ilk anlamlı hareketle
+  seçilip parmak kalkana kadar sabit kalır; değiştirmek için parmağı
+  kaldırıp yeniden sürüklemek yeterli. Eşiğin altında karar verilmez
+  (erken karar parmağın ilk titremesine takılır) ve eşiğe kadar biriken
+  hareket kaybolmaz — ölçüm başlangıç noktasından devam eder.
 - Eski `aimFromPoint` ve ekran→sahne koordinat çevirimi (`sahneNoktasi`)
   artık kullanılmadığı için silindi.
 

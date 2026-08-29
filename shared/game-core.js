@@ -369,6 +369,20 @@
      Deger sinira dayandiginda birikimi TASIRMADAN kirpiyoruz: fazlalik
      saklanirsa parmak ters yone dondugunde deger bir sure kipirdamaz
      ("yapiskan sinir") ve kullanici kontrolu kaybeder. */
+  /* Suruklemenin eksenini kilitler. Capraz harekette aci ve hizin birlikte
+     oynamasi istenmiyor: parmak dikey giderken kacinilmaz olarak biriken
+     birkac piksellik yatay kayma hizi da degistiriyordu.
+
+     Esigin altinda karar YOK (null doner): ilk birkac pikselde karar
+     verilirse parmagin ilk titremesi ekseni yanlis kilitler. Esit
+     durumda aci secilir; kararin belirlenimci olmasi, ayni hareketin
+     her seferinde ayni ekseni vermesi icin onemli. */
+  function aimAxis(dx, dy, esik) {
+    var ax = Math.abs(dx), ay = Math.abs(dy);
+    if (ax < esik && ay < esik) return null;
+    return ax > ay ? "hiz" : "aci";
+  }
+
   function aimStep(deger, piksel, pikselBasi, alt, ust) {
     var y = deger + piksel / pikselBasi;
     return y < alt ? alt : (y > ust ? ust : y);
@@ -1069,6 +1083,7 @@
     hitsGorilla: hitsGorilla,
     muzzle: muzzle,
     aimStep: aimStep,
+    aimAxis: aimAxis,
     simulateShot: simulateShot,
     applyImpact: applyImpact,
     shotDurationMs: shotDurationMs
