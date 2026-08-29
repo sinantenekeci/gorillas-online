@@ -361,23 +361,17 @@
     return { x: g.x + 10 * facingOf(state, shooter), y: g.y - 8 };
   }
 
-  /* Sahnede isaret edilen noktadan aci ve hiz uretir (parmakla nisan alma).
-     Cikis noktasindan hedefe uzanan vektorun acisi aciyi, uzunlugu hizi
-     verir; uzunluk TAM_GUC'te 200'e doyar. Aci daima ATIS YONUNDE olculur,
-     yani sola bakan goril icin eksen cevrilir - oyunun aci tanimi 0-90
-     araligindadir ve yonu facing tasir. Arkaya ya da asagi isaret etmek
-     hataya degil, sinira (90 / 0) goturur. */
-  function aimFromPoint(state, shooter, px, py, tamGuc) {
-    var m = muzzle(state, shooter);
-    var yon = facingOf(state, shooter);
-    var dx = (px - m.x) * yon, dy = m.y - py;
-    var aci = Math.round(Math.atan2(dy, dx) * 180 / Math.PI);
-    var uzak = Math.sqrt((px - m.x) * (px - m.x) + (py - m.y) * (py - m.y));
-    var hiz = Math.round(uzak / (tamGuc || 320) * 200);
-    return {
-      angle: Math.max(0, Math.min(90, aci)),
-      velocity: Math.max(1, Math.min(200, hiz))
-    };
+  /* Parmakla nisan alma: sahnedeki surukleme MUTLAK bir hedef degil,
+     mevcut degere eklenen bir ADIM uretir. Parmak kaldirilip yeniden
+     surukununce deger kaldigi yerden devam eder - kaydiricinin dokunmatik
+     karsiligi gibi calisir.
+
+     Deger sinira dayandiginda birikimi TASIRMADAN kirpiyoruz: fazlalik
+     saklanirsa parmak ters yone dondugunde deger bir sure kipirdamaz
+     ("yapiskan sinir") ve kullanici kontrolu kaybeder. */
+  function aimStep(deger, piksel, pikselBasi, alt, ust) {
+    var y = deger + piksel / pikselBasi;
+    return y < alt ? alt : (y > ust ? ust : y);
   }
 
   /* ---------- atis simulasyonu ----------
@@ -1074,7 +1068,7 @@
     solid: solid,
     hitsGorilla: hitsGorilla,
     muzzle: muzzle,
-    aimFromPoint: aimFromPoint,
+    aimStep: aimStep,
     simulateShot: simulateShot,
     applyImpact: applyImpact,
     shotDurationMs: shotDurationMs

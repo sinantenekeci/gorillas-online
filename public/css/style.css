@@ -343,10 +343,14 @@ main { max-width: 1440px; margin: 0 auto; padding: var(--s5) var(--s4) var(--s7)
 .score.is-turn .score__name { text-decoration: underline; text-underline-offset: 4px; }
 
 .stage { position: relative; border: 3px solid var(--border-strong); background: #000; line-height: 0; }
-.stage canvas { width: 100%; height: auto; display: block; image-rendering: pixelated; }
+/* DOGRUDAN cocuk secilmeli: ortunun icindeki piksel yazi canvas'lari da
+   .stage icinde duruyor. Genel ".stage canvas" onlari da yakaliyor,
+   genisliklerini %100'e cekiyor; mac modunda ise inset:0 ile ust uste
+   bindirip sola yasliyordu. GENEL SECICIYE GERI DONMEYIN. */
+.stage > canvas { width: 100%; height: auto; display: block; image-rendering: pixelated; }
 /* Parmakla nişan alırken tarayıcı kaydırma/yakınlaştırma jestini kapmasın.
    Yalnızca sahadaki canlı oyuncuda açık (app.js/setControls). */
-.stage canvas.is-aim { touch-action: none; cursor: crosshair; }
+.stage > canvas.is-aim { touch-action: none; cursor: crosshair; }
 
 .overlay {
   position: absolute; inset: 0; z-index: var(--z-overlay);
@@ -602,7 +606,7 @@ main { max-width: 1440px; margin: 0 auto; padding: var(--s5) var(--s4) var(--s7)
      bozulmaz, artan yer .stage'in siyah zemininde kalir. Boylece sahneye
      "kalan butun yer" verilebilir, ayrica genislik hesabi gerekmez. */
   body.in-room .stage { flex: 1 1 auto; min-height: 0; border-width: 0; }
-  body.in-room .stage canvas {
+  body.in-room .stage > canvas {
     position: absolute; inset: 0;
     width: 100%; height: 100%; object-fit: contain;
   }
@@ -626,12 +630,13 @@ main { max-width: 1440px; margin: 0 auto; padding: var(--s5) var(--s4) var(--s7)
      kapansin diye visibility gecikmeli. */
   body.in-room .room__side {
     position: fixed; top: 0; right: 0; bottom: 0; z-index: var(--z-modal);
-    width: min(340px, 84vw); gap: var(--s3);
+    display: flex; flex-direction: column;
+    width: min(340px, 84vw); gap: var(--s2);
+    overflow: hidden;                 /* kaydirma ic panellerde */
     padding: var(--s3);
     padding-right: max(var(--s3), env(safe-area-inset-right));
     padding-bottom: max(var(--s3), env(safe-area-inset-bottom));
     background: var(--bg-deep); border-left: 3px solid var(--border-strong);
-    overflow-y: auto; overscroll-behavior: contain;
     visibility: hidden; transform: translateX(101%);
     transition: transform var(--dur) var(--ease-out), visibility 0s linear var(--dur);
   }
@@ -640,8 +645,22 @@ main { max-width: 1440px; margin: 0 auto; padding: var(--s5) var(--s4) var(--s7)
     transition: transform var(--dur) var(--ease-out), visibility 0s;
   }
   body.in-room .panel { border-width: 2px; padding: var(--s2) var(--s3) var(--s3); }
-  body.in-room .panel--chat { min-height: 0; }
-  body.in-room .chat { height: 32vh; }
+  /* Takimlar listesi kendi icinde kayar, sohbet KALAN yerin tamamini alir.
+     Eskiden ikisi de dogal boylarinda uzuyor, sohbet cekmecenin altina
+     tasip tek satir gibi gorunuyordu. */
+  body.in-room .panel--players { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+  /* Cekmece maçtan ONCE takim secmeye, maç SIRASINDA sohbete hizmet ediyor.
+     Yatay telefonda 300 piksel yukseklige ikisi birden sigmadigi icin
+     oncelik duruma gore degisiyor: maç basladiginda takimlar %40'a
+     kirpilip kalan yer sohbete veriliyor. */
+  body.in-room.is-match .panel--players { flex: 0 1 40%; }
+  body.in-room .panel--chat { flex: 1 1 auto; min-height: 120px; display: flex; flex-direction: column; }
+  body.in-room .panel--chat .panel__title { font-size: 9px; margin: 0 0 2px; }
+  /* Yazma satiri 56 pikselden 42'ye: kalan her piksel sohbet kaydina gidiyor,
+     dokunma hedefi hala 36 piksel yuksekliginde. */
+  body.in-room .chat__form { margin-top: var(--s1); }
+  body.in-room .chat__form input, body.in-room .chat__form .btn { min-height: 36px; }
+  body.in-room .chat { flex: 1 1 auto; height: auto; min-height: 0; }
   body.in-room.is-drawer .sidescrim {
     display: block; position: fixed; inset: 0;
     z-index: calc(var(--z-modal) - 1); background: rgba(4,6,14,.6);

@@ -750,50 +750,37 @@ test("binalar arasında görünür genişlikte sokak var", () => {
 });
 
 /* ---------------- parmakla nişan alma ----------------
-   Sahnede işaret edilen nokta açı ve hızı birlikte veriyor. Değerler
-   analitik olarak hesaplanabildiği için altın değerle karşılaştırılıyor;
-   bir işaret hatası (yönün ters çevrilmesi, y ekseninin yukarı sayılması)
-   burada anında görünür. */
-test("işaret edilen nokta açı ve hızı birlikte verir", () => {
-  const s = core.createRound(7, { gravity: 9.8, windOn: false });
-  const m = core.muzzle(s, 0);
-  const yon = core.facingOf(s, 0);
-
-  /* 45 derece: ileri ve yukarı eşit uzaklık. */
-  const a = core.aimFromPoint(s, 0, m.x + 100 * yon, m.y - 100, 320);
-  assert.strictEqual(a.angle, 45);
-  assert.strictEqual(a.velocity, Math.round(Math.hypot(100, 100) / 320 * 200));
-
-  /* Yatay: açı 0. */
-  assert.strictEqual(core.aimFromPoint(s, 0, m.x + 160 * yon, m.y, 320).angle, 0);
-  /* Tam yukarı: açı 90. */
-  assert.strictEqual(core.aimFromPoint(s, 0, m.x, m.y - 160, 320).angle, 90);
+   Sürükleme mutlak bir hedef değil, mevcut değere eklenen bir ADIM üretir.
+   Kritik davranış sınırda: birikim taşırılmadan kırpılmazsa parmak ters
+   yöne döndüğünde değer bir süre kıpırdamaz ve kullanıcı kontrolü kaybeder. */
+test("sürükleme adımı değere eklenir ve piksel başına oran korunur", () => {
+  assert.strictEqual(core.aimStep(45, 30, 3, 0, 90), 55);      // 30px / 3 = +10
+  assert.strictEqual(core.aimStep(45, -30, 3, 0, 90), 35);
+  assert.strictEqual(core.aimStep(50, 40, 2, 1, 200), 70);     // 40px / 2 = +20
+  /* Kesirli kalır: yavaş sürüklemede adımlar sıfıra yuvarlanıp kaybolmasın. */
+  assert.strictEqual(core.aimStep(45, 1, 3, 0, 90), 45 + 1 / 3);
 });
 
-test("nişan açısı goril hangi yöne bakarsa ona göre ölçülür", () => {
-  const s = core.createRound(11, { gravity: 9.8, windOn: false });
-  /* Aynı geometri iki goril için de aynı açıyı vermeli; tek fark, ileri
-     yönün işareti. Ters çevirmeyi unutmak sağdaki goril için açıyı
-     90'a yapıştırırdı. */
-  for (const i of [0, 1]) {
-    const m = core.muzzle(s, i);
-    const yon = core.facingOf(s, i);
-    const r = core.aimFromPoint(s, i, m.x + 200 * yon, m.y - 200, 320);
-    assert.strictEqual(r.angle, 45, "goril " + i);
-  }
-  /* Geriye işaret etmek hataya değil sınıra gider. */
-  const m0 = core.muzzle(s, 0), y0 = core.facingOf(s, 0);
-  assert.strictEqual(core.aimFromPoint(s, 0, m0.x - 200 * y0, m0.y - 10, 320).angle, 90);
-  /* Aşağı işaret etmek de sınıra gider. */
-  assert.strictEqual(core.aimFromPoint(s, 0, m0.x + 200 * y0, m0.y + 200, 320).angle, 0);
+test("adım sınırda kırpılır ve sınır yapışkan değildir", () => {
+  assert.strictEqual(core.aimStep(88, 30, 3, 0, 90), 90, "üst sınırda durur");
+  assert.strictEqual(core.aimStep(2, -30, 3, 0, 90), 0, "alt sınırda durur");
+  assert.strictEqual(core.aimStep(200, 100, 2, 1, 200), 200);
+  assert.strictEqual(core.aimStep(1, -100, 2, 1, 200), 1);
+
+  /* Sınıra dayanmış değer, ters yöndeki İLK harekette hemen kıpırdamalı.
+     Fazlalık saklansaydı burada hâlâ 90 dönerdi. */
+  const ust = core.aimStep(88, 300, 3, 0, 90);
+  assert.strictEqual(ust, 90);
+  assert.strictEqual(core.aimStep(ust, -3, 3, 0, 90), 89);
+  const alt = core.aimStep(5, -300, 2, 1, 200);
+  assert.strictEqual(alt, 1);
+  assert.strictEqual(core.aimStep(alt, 4, 2, 1, 200), 3);
 });
 
-test("nişan hızı uzaklıkla artar ve 1-200 arasında kalır", () => {
-  const s = core.createRound(3, { gravity: 9.8, windOn: false });
-  const m = core.muzzle(s, 0), yon = core.facingOf(s, 0);
-  const hiz = (d) => core.aimFromPoint(s, 0, m.x + d * yon, m.y, 320).velocity;
-  assert.strictEqual(hiz(0), 1, "sıfır uzaklıkta bile hız 1");
-  assert.strictEqual(hiz(320), 200, "tam güç uzaklığında 200");
-  assert.strictEqual(hiz(2000), 200, "üstünde de 200'de kalır");
-  assert.ok(hiz(80) < hiz(160) && hiz(160) < hiz(240), "uzaklıkla artmalı");
+test("art arda sürüklemeler birikir", () => {
+  /* Parmak kaldırılıp yeniden sürüklenince değer kaldığı yerden devam eder;
+     küçük ekranda tek harekette ulaşılamayan değere böyle çıkılıyor. */
+  let a = 45;
+  for (let i = 0; i < 4; i++) a = core.aimStep(a, 30, 3, 0, 90);
+  assert.strictEqual(a, 85);
 });

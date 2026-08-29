@@ -654,24 +654,10 @@ alındı.
 
 ### Sahne üzerinde parmakla nişan alma
 
-Sahnede nereyi işaret edersen muz oraya doğru gidiyor: çıkış noktasından
-parmağa uzanan vektörün açısı açıyı, uzunluğu hızı veriyor (320 sahne
-pikseli = hız 200). Kaydırıcılar yedek olarak duruyor, ikisi de aynı
-değerleri yazıyor.
+İlk sürüm MUTLAK işaretlemeydi (sahnede neyi işaret edersen muz oraya).
+Sinan denedi ve ARTIMLI sürükleme istedi; Revize 9'da öyle değiştirildi,
+aşağıdaki anlatım güncel olanı tarif eder.
 
-- **Neden "Angry Birds gibi geriye çekme" değil?** Geriye çekmek sürüklemeye
-  gorilin ÜZERİNDEN başlamayı gerektiriyor; goril yatay telefonda 10 piksel
-  genişliğinde, ıskalaması kolay. Doğrudan işaretlemede sürükleme sahnenin
-  herhangi bir yerinden başlayabiliyor.
-- Matematik `shared/game-core.js/aimFromPoint()` içinde, `muzzle` ve
-  `facingOf` ile aynı yerde; tarayıcısız test edilebilsin diye oraya kondu.
-  Açı daima ATIŞ YÖNÜNDE ölçülür (sola bakan goril için eksen çevrilir),
-  arkaya ya da aşağı işaret etmek hataya değil sınıra (90 / 0) gider.
-- **Ekran koordinatını sahne koordinatına çeviren eşleme kritik:** maç
-  modunda canvas `object-fit: contain` ile ortalanıp kenarlarda boşluk
-  bırakıyor, normal düzende kutuya birebir oturuyor. `sahneNoktasi()`
-  ikisini de aynı formülle çözüyor; doğrulaması, aynı sahne noktasının iki
-  kipte de aynı açı/hızı vermesi (ölçüldü, birebir aynı).
 - Canvas'a `touch-action: none` yalnızca sahadaki canlı oyuncu için
   veriliyor (`.is-aim` sınıfı); izleyicide sayfa kaydırma jesti bozulmuyor.
 - İpucu satırı alçak ekranlarda gizli olduğu için özellik keşfedilemez
@@ -698,6 +684,61 @@ S25'te sahnenin 414 pikselde kalmasının sebebi artık düzen değil, tarayıc�
 çubuğu kendiliğinden gizlemiyor. Çözüm PWA (`display: fullscreen`) ya da
 kullanıcı hareketiyle Fullscreen API; ikisi de "mağazasız yapı" adımının
 parçası. Aynı ekranda 780×360 ölçüldüğünde sahne 558×233'e çıkıyor.
+
+## Revize 9 (2026-08-29) — S25 geri bildirimi
+
+Sinan Galaxy S25 ile canlı sürümü denedi ("yatayda yerleşim fena değil,
+canvas yeterli") ve dört şey istedi. Dördü de yapıldı.
+
+### 1. Nişan alma mutlak işaretlemeden ARTIMLI sürüklemeye geçti
+
+Yeni davranış: sahnede yukarı sürüklemek açıyı artırır, aşağı azaltır;
+sağa sürüklemek hızı artırır, sola azaltır. İki eksen aynı anda çalışır.
+Sürükleme mutlak bir hedef değil, mevcut değere eklenen bir ADIM verir:
+parmak kaldırılıp yeniden sürüklenince değer kaldığı yerden devam eder.
+Küçük ekranda tek harekette ulaşılamayan değerlere böyle çıkılıyor.
+
+- Duyarlılık EKRAN pikseli cinsinden sabit (3 px = 1 derece, 2 px = 1 hız
+  birimi), sahne ölçüsüne bağlanmadı; aynı hareket her cihazda aynı
+  miktarı değiştirsin diye.
+- Kesirli birikim ayrı tutuluyor (`birikAci`/`birikHiz`). Her olayda
+  yuvarlansaydı yavaş sürüklemede adımlar sıfıra yuvarlanıp hareket
+  tamamen kaybolurdu.
+- **Sınırda birikim TAŞIRILMADAN kırpılıyor** (`GorillasCore.aimStep`).
+  Fazlalık saklansaydı, 90 dereceye dayanmış oyuncu parmağını ters yöne
+  çevirdiğinde değer bir süre kıpırdamazdı ("yapışkan sınır"). Bu davranış
+  testle korunuyor; kırpmayı "sadeleştirip" fazlalığı saklamayın.
+- `pointerdown` artık değeri DEĞİŞTİRMEZ, yalnızca birikimi o anki
+  kaydırıcı değerinden başlatır; sahneye yanlışlıkla dokunmak nişanı
+  bozmuyor.
+- Eski `aimFromPoint` ve ekran→sahne koordinat çevirimi (`sahneNoktasi`)
+  artık kullanılmadığı için silindi.
+
+### 2. Çekmecedeki sohbet tek satıra düşüyordu
+
+Çekmece artık bir flex sütun: takımlar kendi içinde kayıyor, sohbet kalan
+yerin tamamını alıyor. Bölüşüm duruma göre değişiyor, çünkü çekmece maçtan
+ÖNCE takım seçmeye, maç SIRASINDA sohbete hizmet ediyor: maç başlayınca
+takımlar %40'a kırpılıyor (`body.is-match`). Yazma satırı da 56 pikselden
+42'ye indi. Ölçülen (780×300, yatay S25): sohbet kaydı maç sırasında
+36 pikselden **81 piksele**, maç öncesi 33 piksele çıktı.
+
+### 3. Panel düğmesi MENÜ oldu
+
+### 4. Raunt sonu yazılarının üst üste binmesi
+
+Kök neden: `#overlayTitleCv` ve `#overlayTextCv` de `.stage` içindeki
+`<canvas>` etiketleri. Revize 7'de yazılan `body.in-room .stage canvas`
+kuralı (`position: absolute; inset: 0; width/height: 100%`) ikisini de
+yakalıyor, üst üste bindirip sola yaslıyordu. Taban kuraldaki
+`.stage canvas { width: 100% }` da aynı şekilde piksel yazıları geriyordu.
+
+**Her iki kural da artık DOĞRUDAN çocuk seçiyor (`.stage > canvas`).**
+Genel seçiciye geri dönmeyin; ortunun içindeki her canvas yine bozulur.
+
+`npm test` → 132/132 (nişan adımı için üç yeni test: piksel başına oran,
+sınırın yapışkan olmaması, art arda sürüklemelerin birikmesi). Düzen
+ölçüleri Revize 8'deki değerlerin aynısı, gerileme yok.
 
 ## Sıradaki adımlar (yapılmadı)
 

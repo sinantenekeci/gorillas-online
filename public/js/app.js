@@ -552,6 +552,9 @@
       ? windText(room.match.wind)
       : t(room.settings.windOn ? "wind.on" : "wind.off");
 
+    /* Çekmecedeki takım/sohbet bölüşümü maç sürerken değişiyor (style.css). */
+    document.body.classList.toggle("is-match", !!room.match);
+
     const turnTeam = turnTeamOf();
     document.querySelector(".score--red").classList.toggle("is-turn", turnTeam === "red");
     document.querySelector(".score--blue").classList.toggle("is-turn", turnTeam === "blue");
@@ -907,39 +910,34 @@
   });
 
   /* ---------- sahne üzerinde parmakla nişan alma ----------
-     Kaydırıcılar mobilde iki eli ve gözü sahneden ayırıyor. Burada sahnede
-     NEREYİ İŞARET EDERSEN muz oraya doğru gidiyor: çıkış noktasından
-     parmağa uzanan vektörün açısı açıyı, uzunluğu hızı veriyor. Açı ve hız
-     tek harekette çıktığı için ayrı ayrı ayarlamak gerekmiyor; nişan
-     noktaları anında güncellendiği için geri bildirim de sahnenin kendisi.
-     Kaydırıcılar yedek olarak yerinde kalıyor, ikisi de aynı değeri yazar.
+     Kaydırıcılar mobilde iki eli ve gözü sahneden ayırıyor. Sahnede yukarı
+     sürüklemek açıyı artırır, aşağı azaltır; sağa sürüklemek hızı artırır,
+     sola azaltır. İki eksen aynı anda çalışır, çapraz sürükleme ikisini
+     birden değiştirir.
 
-     "Angry Birds gibi geriye çekme" yerine doğrudan işaretleme seçildi:
-     geriye çekmek sürüklemeye GORİLİN ÜZERİNDEN başlamayı gerektiriyor,
-     goril ise yatay telefonda 10 piksel genişliğinde — ıskalaması kolay.
-     İşaretlemede sürükleme sahnenin herhangi bir yerinden başlayabilir. */
-  const SURUKLE_TAM_GUC = 320;      // bu kadar sahne pikseli uzaklik -> hiz 200
+     Sürükleme MUTLAK bir hedef değil, mevcut değere eklenen bir ADIM verir:
+     parmak kaldırılıp yeniden sürüklenince değer kaldığı yerden devam eder.
+     Böylece küçük ekranda tek hareketle ulaşılamayan değerlere art arda
+     hareketlerle çıkılabiliyor.
 
-  /* İstemci canvas'ı ekrana ölçekleyerek basıyor, maç modunda ise
-     object-fit ile ortalayıp kenarlarda boşluk bırakıyor. Fare/parmak
-     konumunu sahne koordinatına çevirirken ikisi de hesaba katılmalı. */
-  function sahneNoktasi(ev) {
-    const r = el.canvas.getBoundingClientRect();
-    const W = el.canvas.width, H = el.canvas.height;
-    const olcek = Math.min(r.width / W, r.height / H);
-    const x0 = r.left + (r.width - W * olcek) / 2;
-    const y0 = r.top + (r.height - H * olcek) / 2;
-    return { x: (ev.clientX - x0) / olcek, y: (ev.clientY - y0) / olcek };
-  }
+     Duyarlılık ekran pikseli cinsinden sabit; sahne ölçüsüne bağlanmadı ki
+     aynı hareket her cihazda aynı miktarı değiştirsin. */
+  const ACI_PIKSEL = 3;      // bir derece icin kac ekran pikseli
+  const HIZ_PIKSEL = 2;      // bir hiz birimi icin kac ekran pikseli
+
+  /* Kesirli birikim ayrı tutuluyor: yavaş sürüklemede her olayda
+     yuvarlansaydı adımlar sıfıra yuvarlanıp hareket kaybolurdu. */
+  let birikAci = 45, birikHiz = 50, sonX = 0, sonY = 0;
 
   function nisanla(ev) {
     if (!inMatch() || !view.state) return;
     const g = view.state.gorillas[myGorilla];
     if (!g || g.dead) return;
-    const p = sahneNoktasi(ev);
-    const n = GorillasCore.aimFromPoint(view.state, myGorilla, p.x, p.y, SURUKLE_TAM_GUC);
-    el.ang.value = n.angle;
-    el.vel.value = n.velocity;
+    birikAci = GorillasCore.aimStep(birikAci, sonY - ev.clientY, ACI_PIKSEL, 0, 90);
+    birikHiz = GorillasCore.aimStep(birikHiz, ev.clientX - sonX, HIZ_PIKSEL, 1, 200);
+    sonX = ev.clientX; sonY = ev.clientY;
+    el.ang.value = Math.round(birikAci);
+    el.vel.value = Math.round(birikHiz);
     readouts();
     sendAim();
   }
@@ -961,7 +959,11 @@
     nisanParmak = e.pointerId;
     el.canvas.setPointerCapture(e.pointerId);
     e.preventDefault();
-    nisanla(e);
+    /* Dokunma anında değer DEĞİŞMEZ; birikim o anki kaydırıcı değerinden
+       başlar. Yanlışlıkla sahneye dokunmak nişanı bozmasın diye. */
+    birikAci = +el.ang.value;
+    birikHiz = +el.vel.value;
+    sonX = e.clientX; sonY = e.clientY;
   });
   el.canvas.addEventListener("pointermove", (e) => {
     if (nisanParmak !== e.pointerId) return;
