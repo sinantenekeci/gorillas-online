@@ -305,15 +305,18 @@ main { max-width: 1440px; margin: 0 auto; padding: var(--s5) var(--s4) var(--s7)
 
 /* ---------------- oda görünümü ---------------- */
 .view--room { display: grid; gap: var(--s3); grid-template-columns: 1fr; align-items: start; }
-/* Sahne 960x400 (12:5). Genisligine gore olceklenirse dar ve yuksek ekranda
-   kaydiricilar katlanmanin altinda kaliyordu; bu yuzden sahnenin genisligi
-   EKRAN YUKSEKLIGINDEN turetilir. 420px, sahnenin ustunde ve altinda duran
-   degismez oge yiginin (ust bar + oda bari + skor tablosu + kontroller)
-   olculmus yaklasik toplamidir. Masaustu blogu bunu kendi sabitiyle ezer. */
+/* Sahne 960x400 (12:5) ve genisligi EKRAN YUKSEKLIGINDEN turer: once sahne
+   disindaki her seyin (ust bar, oda bari, skor tablosu, kontroller) yedigi
+   yer dusulur, kalan yukseklik 2.4 ile carpilir.
+   Bu artigi sabitle TAHMIN ETMEYIN — yazi tipinin yuklenmesi, dil, sira
+   metninin uzunlugu ve tarayici cubugu yigini surekli degistiriyor; 450'lik
+   sabit yuzunden yatay tablette sahne 570 piksele hapsolup sayfa 141 piksel
+   kayiyordu. Degeri app.js/sahneyiSigdir() olcup --sahne-en'e yazar;
+   asagidaki tahmin yalnizca JS calismazsa devreye girer. */
 .room__main {
   min-width: 0;
   width: 100%;
-  max-width: min(100%, max(320px, calc((100dvh - 420px) * 2.4)));
+  max-width: min(100%, max(320px, var(--sahne-en, calc((100dvh - 420px) * 2.4))));
   margin-inline: auto;
 }
 .room__bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); margin-bottom: var(--s3); }
@@ -490,10 +493,14 @@ main { max-width: 1440px; margin: 0 auto; padding: var(--s5) var(--s4) var(--s7)
 @media (min-width: 1024px) {
   main { padding: var(--s4) var(--s4) var(--s6); }
   .view--room { grid-template-columns: minmax(0, 1fr) 300px; }
-  /* Sahne 16:10; yüksekliği ekrana sığdırıp genişliği ona göre kısıtlıyoruz,
-     yoksa atış kaydırıcıları katlanmanın altında kalıyor. */
-  .room__main { width: 100%; max-width: min(100%, max(560px, calc((100dvh - 450px) * 2.4))); margin-inline: auto; }
-  .room__side { position: sticky; top: 96px; }
+  /* Yan panel eskiden kendi boyunca uzuyor, izgara satirini sahneden daha
+     uzun yapip SAYFAYI kaydiriyordu (yatay tablette 141 piksel). Artik
+     sahne sutunu kadar yer kaplar, tasan kismi kendi icinde kayar. */
+  .room__side {
+    position: sticky; top: 96px;
+    max-height: var(--yan-en-cok, calc(100dvh - 112px));
+    overflow-y: auto; overscroll-behavior: contain;
+  }
   .panel--chat { min-height: 0; }
   .chat { height: 220px; }
 }
@@ -510,6 +517,31 @@ main { max-width: 1440px; margin: 0 auto; padding: var(--s5) var(--s4) var(--s7)
   .lobby__actions .field--inline input { min-width: 0; width: 100%; }
   .rooms { grid-template-columns: 1fr; }
   .score__name { font-size: 9px; }
+}
+
+/* ---------------- alcak ekran: oda cevresini inceltme ----------------
+   Yatay tablet ve alcak dizustu penceresinde asil sorun genislik degil
+   yukseklik: sahnenin ustunde ve altinda duran her piksel, sahnenin
+   genisliginden 2.4 katiyla dusuyor. Burada kirpilan ~90 piksel, 1400x690
+   bir tablette sahneyi 570 pikselden 1036 piksele cikariyor. */
+@media (max-height: 820px) {
+  /* Ust bar ve sayfa dolgusu da oda gorunumunde inceltilir; lobi dokunulmaz. */
+  body.in-room .topbar { padding: var(--s2) var(--s4); }
+  body.in-room .topbar .logo { width: 26px; height: 26px; }
+  body.in-room .topbar h1 { font-size: 13px; }
+  body.in-room .topbar h1 span { font-size: 8px; margin-top: 3px; }
+  body.in-room .chip, body.in-room .status { min-height: 36px; }
+  body.in-room #main { padding-top: var(--s2); padding-bottom: var(--s3); }
+  body.in-room .room__bar { margin-bottom: var(--s2); }
+  body.in-room .room__bar .btn { min-height: 34px; }
+  body.in-room .scoreboard { padding: var(--s1) var(--s3); }
+  body.in-room .controls { padding: var(--s2) var(--s3); }
+  body.in-room .controls__turn { min-height: 0; margin-bottom: var(--s1); }
+  /* Etiket kaydiricinin ustunde degil YANINDA; tek basina ~20 piksel. */
+  body.in-room .ctl { display: flex; align-items: center; gap: var(--s2); }
+  body.in-room .ctl .field__label { flex: 0 0 auto; margin: 0; }
+  body.in-room .ctl input[type="range"] { flex: 1 1 auto; height: 34px; }
+  body.in-room .hint { display: none; }
 }
 
 /* ---------------- dar ekran: cekmece, mac modu, yon uyarisi ----------------
@@ -577,11 +609,11 @@ main { max-width: 1440px; margin: 0 auto; padding: var(--s5) var(--s4) var(--s7)
   }
   body.in-room .controls__turn { min-height: 0; margin-bottom: 2px; font-size: 15px; line-height: 1.2; }
   body.in-room .controls__row { flex-wrap: nowrap; gap: var(--s2); align-items: center; }
-  /* Etiket kaydiricinin ustunde degil YANINDA: dar ekranda kazanilan her
-     satir dogrudan sahnenin yuksekligine, o da genisligine yaziliyor. */
-  body.in-room .ctl { display: flex; align-items: center; gap: var(--s2); flex: 1 1 0; min-width: 0; }
-  body.in-room .ctl .field__label { flex: 0 0 auto; margin: 0; font-size: 9px; }
-  body.in-room .ctl input[type="range"] { flex: 1 1 auto; height: 28px; }
+  /* Etiketin kaydiricinin yanina gecmesi bir ust blokta; burada yalnizca
+     yatay telefona gore kucultuluyor. */
+  body.in-room .ctl { flex: 1 1 0; min-width: 0; }
+  body.in-room .ctl .field__label { font-size: 9px; }
+  body.in-room .ctl input[type="range"] { height: 28px; }
   body.in-room .btn--fire { flex: 0 0 auto; min-height: 36px; padding: 0 var(--s3); font-size: 10px; }
   body.in-room .hint { display: none; }
   body.in-room .timer__bar { width: 56px; height: 10px; }

@@ -14,6 +14,11 @@
     roomName: $("roomName"), roomCode: $("roomCode"), copyLinkBtn: $("copyLinkBtn"),
     leaveBtn: $("leaveBtn"), settingsBtn: $("settingsBtn"),
     panelBtn: $("panelBtn"), sideScrim: $("sideScrim"), rotateDismiss: $("rotateDismiss"),
+    main: $("main"), roomSide: $("roomSide"), stage: $("stage"),
+    roomMain: document.querySelector(".room__main"),
+    roomBar: document.querySelector(".room__bar"),
+    scoreboard: document.querySelector(".scoreboard"),
+    controls: $("controls"),
     redVal: $("redVal"), blueVal: $("blueVal"),
     roundLabel: $("roundLabel"), windLabel: $("windLabel"),
     overlay: $("overlay"),
@@ -448,7 +453,64 @@
        govdeye yazar. Odadan cikarken cekmece acik kalmasin. */
     document.body.classList.toggle("in-room", inRoom);
     if (!inRoom) setDrawer(false);
-    if (inRoom) el.chatInput.focus();
+    if (inRoom) { el.chatInput.focus(); sahneyiSigdir(); }
+  }
+
+  /* ---------- sahneyi ekrana sığdır ----------
+     Sahne 12:5; genişliği yüksekliğinden türer. Kalan yüksekliği bir CSS
+     sabitiyle TAHMİN ETMEK işe yaramıyor: yazı tipinin yüklenmesi, dil,
+     sıra metninin uzunluğu, sayacın görünüp kaybolması ve tarayıcı çubuğu
+     sahne dışındaki yığını sürekli değiştiriyor. Burada ölçülüp
+     --sahne-en'e yazılıyor; CSS onu okuyor.
+
+     Döngü, ölçümün kendi sonucunu değiştirmesine karşı: sahne daralınca
+     kontroller katlanıp uzayabilir, o da sahneyi tekrar daraltır. İki
+     pikselden küçük oynamada duruyoruz, yoksa salınım sürer. */
+  function sahneyiSigdir() {
+    if (!document.body.classList.contains("in-room")) return;
+    const kok = document.documentElement;
+    const kenar = (n, a, b) => {
+      const st = getComputedStyle(n);
+      return (parseFloat(st[a]) || 0) + (parseFloat(st[b]) || 0);
+    };
+    const stageY = kenar(el.stage, "borderTopWidth", "borderBottomWidth");
+    const stageX = kenar(el.stage, "borderLeftWidth", "borderRightWidth");
+    /* offsetHeight kenar boşluğunu (margin) SAYMAZ; oda barının altındaki
+       12 piksel bu yüzden hesabın dışında kalıp sayfayı kaydırıyordu. */
+    const disBoy = (n) => n.offsetHeight + kenar(n, "marginTop", "marginBottom");
+    for (let i = 0; i < 3; i++) {
+      const altDolgu = parseFloat(getComputedStyle(el.main).paddingBottom) || 0;
+      const bos = window.innerHeight
+        - el.roomMain.getBoundingClientRect().top
+        - disBoy(el.roomBar)
+        - disBoy(el.scoreboard)
+        - disBoy(el.controls)
+        - altDolgu;
+      const en = Math.max(320, Math.floor((bos - stageY) * 2.4 + stageX));
+      const eski = parseFloat(kok.style.getPropertyValue("--sahne-en")) || 0;
+      if (Math.abs(en - eski) <= 2) break;
+      kok.style.setProperty("--sahne-en", en + "px");
+    }
+    /* Yan panel sahne sütunundan uzun olursa ızgara satırını büyütüp
+       SAYFAYI kaydırıyordu; boyu sütuna eşitlenir, taşan kısım kendi
+       içinde kayar. */
+    kok.style.setProperty("--yan-en-cok",
+      Math.round(el.roomMain.getBoundingClientRect().height) + "px");
+  }
+
+  /* Ölçüyü bozan her şey burada: pencere boyu, yön, yazı tipi ve sahne
+     dışındaki şeritlerin kendi yükseklik değişimleri. */
+  let sigdirBekleyen = 0;
+  function sigdirIste() {
+    if (sigdirBekleyen) return;
+    sigdirBekleyen = requestAnimationFrame(() => { sigdirBekleyen = 0; sahneyiSigdir(); });
+  }
+  window.addEventListener("resize", sigdirIste);
+  window.addEventListener("orientationchange", sigdirIste);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(sigdirIste);
+  if (window.ResizeObserver) {
+    const gozcu = new ResizeObserver(sigdirIste);
+    [el.roomBar, el.scoreboard, el.controls].forEach((n) => gozcu.observe(n));
   }
 
   /* ---------- dar ekran cekmecesi ----------
