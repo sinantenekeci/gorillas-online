@@ -14,7 +14,7 @@
     roomName: $("roomName"), roomCode: $("roomCode"), copyLinkBtn: $("copyLinkBtn"),
     leaveBtn: $("leaveBtn"), settingsBtn: $("settingsBtn"),
     panelBtn: $("panelBtn"), sideScrim: $("sideScrim"), rotateDismiss: $("rotateDismiss"),
-    main: $("main"), roomSide: $("roomSide"), stage: $("stage"),
+    main: $("main"), roomSide: $("roomSide"), stage: $("stage"), canvas: $("c"),
     roomMain: document.querySelector(".room__main"),
     roomBar: document.querySelector(".room__bar"),
     scoreboard: document.querySelector(".scoreboard"),
@@ -727,6 +727,7 @@
     startTimer(m.seconds || (room ? room.settings.turnSeconds : 30));
     renderRoom();
     if (isMyTurn()) {
+      surukleIpucu();
       sendAim();
       if (document.activeElement === document.body) el.ang.focus();
     }
@@ -852,6 +853,9 @@
     const oynayan = !!room && !!room.match && myGorilla >= 0 &&
       !(room.match.dead && room.match.dead[myGorilla]);
     el.ang.disabled = el.vel.disabled = !oynayan;
+    /* Parmakla nişan yalnızca sahadaki canlı oyuncuya açık; sınıf hem
+       imleci hem de touch-action'ı çeviriyor (bkz. style.css). */
+    el.canvas.classList.toggle("is-aim", oynayan);
   }
 
   function updateTurnUI() {
@@ -901,6 +905,76 @@
     n.addEventListener("input", () => { readouts(); sendAim(); });
     n.addEventListener("keydown", (e) => { if (e.key === "Enter") fire(); });
   });
+
+  /* ---------- sahne üzerinde parmakla nişan alma ----------
+     Kaydırıcılar mobilde iki eli ve gözü sahneden ayırıyor. Burada sahnede
+     NEREYİ İŞARET EDERSEN muz oraya doğru gidiyor: çıkış noktasından
+     parmağa uzanan vektörün açısı açıyı, uzunluğu hızı veriyor. Açı ve hız
+     tek harekette çıktığı için ayrı ayrı ayarlamak gerekmiyor; nişan
+     noktaları anında güncellendiği için geri bildirim de sahnenin kendisi.
+     Kaydırıcılar yedek olarak yerinde kalıyor, ikisi de aynı değeri yazar.
+
+     "Angry Birds gibi geriye çekme" yerine doğrudan işaretleme seçildi:
+     geriye çekmek sürüklemeye GORİLİN ÜZERİNDEN başlamayı gerektiriyor,
+     goril ise yatay telefonda 10 piksel genişliğinde — ıskalaması kolay.
+     İşaretlemede sürükleme sahnenin herhangi bir yerinden başlayabilir. */
+  const SURUKLE_TAM_GUC = 320;      // bu kadar sahne pikseli uzaklik -> hiz 200
+
+  /* İstemci canvas'ı ekrana ölçekleyerek basıyor, maç modunda ise
+     object-fit ile ortalayıp kenarlarda boşluk bırakıyor. Fare/parmak
+     konumunu sahne koordinatına çevirirken ikisi de hesaba katılmalı. */
+  function sahneNoktasi(ev) {
+    const r = el.canvas.getBoundingClientRect();
+    const W = el.canvas.width, H = el.canvas.height;
+    const olcek = Math.min(r.width / W, r.height / H);
+    const x0 = r.left + (r.width - W * olcek) / 2;
+    const y0 = r.top + (r.height - H * olcek) / 2;
+    return { x: (ev.clientX - x0) / olcek, y: (ev.clientY - y0) / olcek };
+  }
+
+  function nisanla(ev) {
+    if (!inMatch() || !view.state) return;
+    const g = view.state.gorillas[myGorilla];
+    if (!g || g.dead) return;
+    const p = sahneNoktasi(ev);
+    const n = GorillasCore.aimFromPoint(view.state, myGorilla, p.x, p.y, SURUKLE_TAM_GUC);
+    el.ang.value = n.angle;
+    el.vel.value = n.velocity;
+    readouts();
+    sendAim();
+  }
+
+  /* Dokunmatikte ipucu satırı ekran yeri yemesin diye gizli; sürükleyerek
+     nişan alma da o yüzden keşfedilemez kalıyordu. Oyuncunun ilk sırasında
+     bir kez, yalnızca kaba işaretleyicide (parmak) söyleniyor. */
+  let surukleIpucuVerildi = false;
+  function surukleIpucu() {
+    if (surukleIpucuVerildi) return;
+    if (!window.matchMedia || !window.matchMedia("(pointer: coarse)").matches) return;
+    surukleIpucuVerildi = true;
+    toast(t("ctl.hintDrag"));
+  }
+
+  let nisanParmak = null;
+  el.canvas.addEventListener("pointerdown", (e) => {
+    if (!inMatch()) return;
+    nisanParmak = e.pointerId;
+    el.canvas.setPointerCapture(e.pointerId);
+    e.preventDefault();
+    nisanla(e);
+  });
+  el.canvas.addEventListener("pointermove", (e) => {
+    if (nisanParmak !== e.pointerId) return;
+    e.preventDefault();
+    nisanla(e);
+  });
+  const nisanBirak = (e) => {
+    if (nisanParmak !== e.pointerId) return;
+    nisanParmak = null;
+    if (el.canvas.hasPointerCapture(e.pointerId)) el.canvas.releasePointerCapture(e.pointerId);
+  };
+  el.canvas.addEventListener("pointerup", nisanBirak);
+  el.canvas.addEventListener("pointercancel", nisanBirak);
 
   function fire() {
     if (!isMyTurn()) return;

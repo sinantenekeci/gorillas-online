@@ -361,6 +361,25 @@
     return { x: g.x + 10 * facingOf(state, shooter), y: g.y - 8 };
   }
 
+  /* Sahnede isaret edilen noktadan aci ve hiz uretir (parmakla nisan alma).
+     Cikis noktasindan hedefe uzanan vektorun acisi aciyi, uzunlugu hizi
+     verir; uzunluk TAM_GUC'te 200'e doyar. Aci daima ATIS YONUNDE olculur,
+     yani sola bakan goril icin eksen cevrilir - oyunun aci tanimi 0-90
+     araligindadir ve yonu facing tasir. Arkaya ya da asagi isaret etmek
+     hataya degil, sinira (90 / 0) goturur. */
+  function aimFromPoint(state, shooter, px, py, tamGuc) {
+    var m = muzzle(state, shooter);
+    var yon = facingOf(state, shooter);
+    var dx = (px - m.x) * yon, dy = m.y - py;
+    var aci = Math.round(Math.atan2(dy, dx) * 180 / Math.PI);
+    var uzak = Math.sqrt((px - m.x) * (px - m.x) + (py - m.y) * (py - m.y));
+    var hiz = Math.round(uzak / (tamGuc || 320) * 200);
+    return {
+      angle: Math.max(0, Math.min(90, aci)),
+      velocity: Math.max(1, Math.min(200, hiz))
+    };
+  }
+
   /* ---------- atis simulasyonu ----------
      Doner: kare basina muz konumlari + carpma bilgisi.
      Math.cos/sin motorlar arasi bit-esdegerli olmadigi icin yorunge
@@ -1055,6 +1074,7 @@
     solid: solid,
     hitsGorilla: hitsGorilla,
     muzzle: muzzle,
+    aimFromPoint: aimFromPoint,
     simulateShot: simulateShot,
     applyImpact: applyImpact,
     shotDurationMs: shotDurationMs

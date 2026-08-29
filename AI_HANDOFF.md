@@ -610,13 +610,102 @@ Odaya girildi, bot eklendi, maç başlatıldı, muz atıldı; her ölçüde
   satırın (viewport-fit, safe-area, kırılma noktası) yerinde durması. İkisi
   de kaldırma denemesiyle kırmızıya döndüğü doğrulandı. `npm test` → 129/129.
 
+## Revize 8 (2026-08-29) — ölçüme dayalı sahne, parmakla nişan
+
+Revize 7'den sonra Sinan iki cihazda deneyip iki eksik bildirdi: Galaxy S25'te
+yatay modda kaydırıcıların tamamı ekrana sığmıyor, Galaxy Tab S9+ tablette
+yatay modda oyun alanı hâlâ çok küçük. Birinci sorun aslında Revize 7'de
+çözülmüştü — Sinan canlı sürümü deniyordu, oraya henüz push edilmemişti.
+İkincisi gerçekti ve çözüldü.
+
+### Kalan yükseklik artık tahmin edilmiyor, ÖLÇÜLÜYOR
+
+Sahnenin genişliğini belirleyen "sahne dışındaki her şeyin yediği yer"
+CSS'te sabitle yazılıydı (masaüstü kolunda 450px). Bu sabit yanlıştı ve
+yanlış olmaya mahkûmdu: yazı tipinin yüklenmesi, dil, sıra metninin
+uzunluğu, sayacın görünüp kaybolması ve tarayıcı çubuğu o yığını sürekli
+değiştiriyor. Ölçüldü: 1400×690'lık bir tablette sahne 570×238'de kalıyor
+ve sayfa 141 piksel kayıyordu.
+
+Değeri artık `app.js/sahneyiSigdir()` çalışma anında ölçüp `--sahne-en`
+CSS değişkenine yazıyor; CSS onu okuyor. Bilinmesi gerekenler:
+
+- **Ölçüm kendi sonucunu değiştirebilir** (sahne daralınca kontroller
+  katlanıp uzayabilir), o yüzden en fazla üç tur dönüyor ve iki piksel
+  toleransla duruyor. Beş farklı ölçüde tek turda oturduğu ölçüldü.
+- **`offsetHeight` kenar boşluğunu (margin) SAYMAZ.** Oda barının
+  altındaki 12 piksel bu yüzden hesabın dışında kalıyor ve sayfayı
+  kaydırıyordu; `disBoy()` yardımcısı marginleri ekliyor. Bu satırı
+  sadeleştirmeye kalkmayın.
+- **Sayfayı kaydıran ikinci şey yan paneldi.** Izgara satırının yüksekliği
+  sütunların en uzunu kadar olduğu için, takımlar + sohbet sahneden uzun
+  olduğunda satırı o büyütüyordu. Artık boyu sahne sütununa eşitleniyor
+  (`--yan-en-cok`), taşan kısmı kendi içinde kayıyor.
+- JS çalışmazsa CSS'teki eski tahmin (`calc((100dvh - 420px) * 2.4)`)
+  yedek olarak duruyor.
+
+Ayrıca yüksekliği 820 pikselden alçak HER ekranda oda çevresi inceltildi:
+üst bar, sayfa dolgusu, oda barı, skor tablosu, kontroller ve açı/hız
+etiketlerinin kaydırıcının yanına geçmesi. Sahnenin üstündeki her piksel
+genişliğinden 2.4 katıyla düşüyor, o yüzden bu kırpma doğrudan oyun alanına
+yazılıyor. Aynı sebeple **ipucu satırına cümle eklerken dikkat**: satır
+katlandığında 1440×860'ta sahne 62 piksel daraldı, cümle kısaltılarak geri
+alındı.
+
+### Sahne üzerinde parmakla nişan alma
+
+Sahnede nereyi işaret edersen muz oraya doğru gidiyor: çıkış noktasından
+parmağa uzanan vektörün açısı açıyı, uzunluğu hızı veriyor (320 sahne
+pikseli = hız 200). Kaydırıcılar yedek olarak duruyor, ikisi de aynı
+değerleri yazıyor.
+
+- **Neden "Angry Birds gibi geriye çekme" değil?** Geriye çekmek sürüklemeye
+  gorilin ÜZERİNDEN başlamayı gerektiriyor; goril yatay telefonda 10 piksel
+  genişliğinde, ıskalaması kolay. Doğrudan işaretlemede sürükleme sahnenin
+  herhangi bir yerinden başlayabiliyor.
+- Matematik `shared/game-core.js/aimFromPoint()` içinde, `muzzle` ve
+  `facingOf` ile aynı yerde; tarayıcısız test edilebilsin diye oraya kondu.
+  Açı daima ATIŞ YÖNÜNDE ölçülür (sola bakan goril için eksen çevrilir),
+  arkaya ya da aşağı işaret etmek hataya değil sınıra (90 / 0) gider.
+- **Ekran koordinatını sahne koordinatına çeviren eşleme kritik:** maç
+  modunda canvas `object-fit: contain` ile ortalanıp kenarlarda boşluk
+  bırakıyor, normal düzende kutuya birebir oturuyor. `sahneNoktasi()`
+  ikisini de aynı formülle çözüyor; doğrulaması, aynı sahne noktasının iki
+  kipte de aynı açı/hızı vermesi (ölçüldü, birebir aynı).
+- Canvas'a `touch-action: none` yalnızca sahadaki canlı oyuncu için
+  veriliyor (`.is-aim` sınıfı); izleyicide sayfa kaydırma jesti bozulmuyor.
+- İpucu satırı alçak ekranlarda gizli olduğu için özellik keşfedilemez
+  kalıyordu; oyuncunun ilk sırasında bir kez, yalnızca kaba işaretleyicide
+  (parmak) toast gösteriliyor.
+
+### Ölçülen sonuçlar (Playwright, gerçek sunucuya karşı, maç sırasında)
+
+| Ekran | Revize 7 sonu | Revize 8 sonu |
+|---|---|---|
+| 1400×690 (Tab S9+) | 570×238, 141px kaydırma | **991×413, kaydırma yok** |
+| 1400×800 | 834×348, 31px kaydırma | 1030×429, kaydırma yok |
+| 1024×768 | 674×281, 3px kaydırma | 674×281, kaydırma yok |
+| 1440×860 | 978×408 | 1048×437 |
+| 1920×940 | 1070×446 | 1070×446 (değişmedi) |
+| 780×300 (S25 yatay) | 414×173 | 414×173, kaydırma yok |
+
+`npm test` → 132/132 (nişan matematiği için üç altın değer testi eklendi).
+
+### Mobilde sıradaki en büyük kazanç: tarayıcı çubuğunu kaldırmak
+
+S25'te sahnenin 414 pikselde kalmasının sebebi artık düzen değil, tarayıcı
+çubuğunun yediği 60 piksel. Maç modunda sayfa kaydırılmadığı için Android
+çubuğu kendiliğinden gizlemiyor. Çözüm PWA (`display: fullscreen`) ya da
+kullanıcı hareketiyle Fullscreen API; ikisi de "mağazasız yapı" adımının
+parçası. Aynı ekranda 780×360 ölçüldüğünde sahne 558×233'e çıkıyor.
+
 ## Sıradaki adımlar (yapılmadı)
 
-- **PWA (mobil yolun ikinci adımı).** Düzen işi bitti; sırada manifest ve
-  tam ekran ile oyunun ana ekrana eklenebilmesi var. Karar ve gerekçe
-  yukarıdaki "Mobil sürüm kararı" bölümünde.
-- **Canvas üzerinde parmakla nişan alma.** Ayrı kapsam olarak önerildi,
-  Sinan'ın onayı henüz alınmadı. Ayrıntı yukarıda.
+- **PWA / mağazasız yapı (SIRADAKİ İŞ).** Sinan onayladı; sırası, mobilde
+  her şeyin yolunda gittiği doğrulandıktan sonra. Manifest + `display:
+  fullscreen` aynı zamanda tarayıcı çubuğunu kaldırıp yatay telefonda
+  sahneyi 414'ten 558 piksele çıkarıyor (yukarıda ölçüldü). Karar ve
+  gerekçe "Mobil sürüm kararı" bölümünde.
 - Odaya maç ortasında giren izleyici, süren atışın canlandırmasını görmez;
   yalnızca sonucu görür.
 - Takım arkadaşını vurmak serbest; dost ateşi engellenmiyor.

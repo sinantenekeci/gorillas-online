@@ -344,6 +344,9 @@ main { max-width: 1440px; margin: 0 auto; padding: var(--s5) var(--s4) var(--s7)
 
 .stage { position: relative; border: 3px solid var(--border-strong); background: #000; line-height: 0; }
 .stage canvas { width: 100%; height: auto; display: block; image-rendering: pixelated; }
+/* Parmakla nişan alırken tarayıcı kaydırma/yakınlaştırma jestini kapmasın.
+   Yalnızca sahadaki canlı oyuncuda açık (app.js/setControls). */
+.stage canvas.is-aim { touch-action: none; cursor: crosshair; }
 
 .overlay {
   position: absolute; inset: 0; z-index: var(--z-overlay);
