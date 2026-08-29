@@ -2,7 +2,7 @@
 <html lang="tr">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>GORILLAS ONLINE — Muz Savaşları</title>
 <meta name="description" content="QBasic klasiği Gorillas'ın çok oyunculu sürümü. Oda kur, arkadaşlarını çağır, sırayla muz at.">
 <meta name="theme-color" content="#0F172A">
@@ -30,6 +30,8 @@
   <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a4 4 0 0 0 6 .5l2-2a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 11a4 4 0 0 0-6-.5l-2 2A4 4 0 0 0 11.7 18l1-1"/></symbol>
   <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
   <symbol id="i-boot" viewBox="0 0 24 24"><path d="M12 4v8"/><path d="M7.5 6.5a7 7 0 1 0 9 0"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+  <symbol id="i-rotate" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="10" rx="1"/><path d="M9 3.5 11 5.5 9 7.5"/><path d="M11 5.5H7a3 3 0 0 0-3 3"/></symbol>
   <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18"/></symbol>
 </svg>
 
@@ -120,6 +122,14 @@
         <button id="settingsBtn" class="btn btn--ghost btn--sm" type="button" hidden>
           <svg class="ic" aria-hidden="true"><use href="#i-gear"/></svg> <span data-i18n="room.settings">AYARLAR</span>
         </button>
+        <!-- Dar ekranda takimlar ve sohbet cekmeceye tasinir; bu dugme onu acar.
+             Genis ekranda CSS ile gizlenir, panel zaten sagda durur. -->
+        <button id="panelBtn" class="btn btn--ghost btn--sm room__panelbtn" type="button"
+                aria-expanded="false" aria-controls="roomSide"
+                data-i18n-aria="room.panelAria" aria-label="Takımlar ve sohbeti aç">
+          <svg class="ic" aria-hidden="true"><use href="#i-menu"/></svg>
+          <span data-i18n="room.panel">PANEL</span>
+        </button>
       </div>
 
       <div class="scoreboard">
@@ -181,7 +191,7 @@
       </div>
     </div>
 
-    <aside class="room__side">
+    <aside id="roomSide" class="room__side">
       <section class="panel panel--players">
         <div class="teams">
           <div class="team team--red">
@@ -366,6 +376,20 @@
         <button class="btn btn--primary" type="submit" data-i18n="modal.apply">UYGULA</button>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- Cekmece acikken arkadaki sahneyi karartan ve dokununca kapatan perde. -->
+<div id="sideScrim" class="sidescrim"></div>
+
+<!-- Sahne 12:5; dikey telefona anlamli bicimde sigmiyor. Cevirmeyi oneririz ama
+     yon kilidi acik kullaniciyi kilitlemeyelim diye uyari gecilebilir. -->
+<div id="rotateHint" class="rotate" role="dialog" aria-labelledby="rotateTitle">
+  <div class="rotate__box">
+    <svg class="rotate__ic" aria-hidden="true"><use href="#i-rotate"/></svg>
+    <h2 id="rotateTitle" data-i18n="rotate.title">TELEFONU YAN ÇEVİR</h2>
+    <p class="muted" data-i18n="rotate.text">Saha geniş bir manzara; yatay tuttuğunda ekrana tam sığar.</p>
+    <button id="rotateDismiss" class="btn btn--ghost btn--sm" type="button" data-i18n="rotate.dismiss">YİNE DE DEVAM ET</button>
   </div>
 </div>
 

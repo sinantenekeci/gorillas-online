@@ -75,6 +75,11 @@
       "room.start": "MAÇI BAŞLAT",
       "room.startNeed": "HER İKİ TAKIM DA DOLU OLMALI",
       "room.spectators": "İZLEYİCİ",
+      "room.panel": "PANEL",
+      "room.panelAria": "Takımlar ve sohbeti aç",
+      "rotate.title": "TELEFONU YAN ÇEVİR",
+      "rotate.text": "Saha geniş bir manzara; telefonu yatay tuttuğunda ekrana tam sığar.",
+      "rotate.dismiss": "YİNE DE DEVAM ET",
       "bot.add": "BOT EKLE",
       "bot.tag": "BOT",
 
@@ -269,6 +274,11 @@
       "room.start": "START MATCH",
       "room.startNeed": "BOTH TEAMS NEED PLAYERS",
       "room.spectators": "SPECTATORS",
+      "room.panel": "PANEL",
+      "room.panelAria": "Open teams and chat",
+      "rotate.title": "TURN YOUR PHONE",
+      "rotate.text": "The arena is a wide view; it fits the screen in landscape.",
+      "rotate.dismiss": "CONTINUE ANYWAY",
       "bot.add": "ADD BOT",
       "bot.tag": "BOT",
 

@@ -59,6 +59,7 @@ body {
   font-size: 20px;             /* VT323 küçük görünür; 20px ~ 16px normal gövde */
   line-height: 1.5;
   -webkit-font-smoothing: none;
+  touch-action: manipulation;
 }
 
 /* Piksel fontların etrafındaki bulanıklık kasıtlı efektlerden geliyordu:
@@ -304,7 +305,17 @@ main { max-width: 1440px; margin: 0 auto; padding: var(--s5) var(--s4) var(--s7)
 
 /* ---------------- oda görünümü ---------------- */
 .view--room { display: grid; gap: var(--s3); grid-template-columns: 1fr; align-items: start; }
-.room__main { min-width: 0; }
+/* Sahne 960x400 (12:5). Genisligine gore olceklenirse dar ve yuksek ekranda
+   kaydiricilar katlanmanin altinda kaliyordu; bu yuzden sahnenin genisligi
+   EKRAN YUKSEKLIGINDEN turetilir. 420px, sahnenin ustunde ve altinda duran
+   degismez oge yiginin (ust bar + oda bari + skor tablosu + kontroller)
+   olculmus yaklasik toplamidir. Masaustu blogu bunu kendi sabitiyle ezer. */
+.room__main {
+  min-width: 0;
+  width: 100%;
+  max-width: min(100%, max(320px, calc((100dvh - 420px) * 2.4)));
+  margin-inline: auto;
+}
 .room__bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); margin-bottom: var(--s3); }
 .room__name { flex: 1 1 200px; margin: 0; font-size: 13px; color: var(--warn); word-break: break-word; }
 #roomCode { font-family: var(--font-body); font-size: 18px; letter-spacing: .2em; }
@@ -499,6 +510,127 @@ main { max-width: 1440px; margin: 0 auto; padding: var(--s5) var(--s4) var(--s7)
   .lobby__actions .field--inline input { min-width: 0; width: 100%; }
   .rooms { grid-template-columns: 1fr; }
   .score__name { font-size: 9px; }
+}
+
+/* ---------------- dar ekran: cekmece, mac modu, yon uyarisi ----------------
+   Bu bolumun tamami yalnizca oda gorunumunde (body.in-room) devrededir; lobi
+   her ekranda normal akisinda kalir. */
+
+/* Panel dugmesi ve perde masaustunde anlamsiz; yan panel zaten sagda durur.
+   .btn kendi display'ini tanimladigi icin bu kural ondan SONRA gelmeli. */
+.room__panelbtn { display: none; }
+.sidescrim { display: none; }
+.rotate { display: none; }
+
+@media (orientation: landscape) and (max-height: 620px) {
+  /* Yatay telefonda dikey piksel altin degerinde: sayfa kaydirmasi kapanir,
+     ust bar gizlenir, oda gorunumu tam ekrani kaplar. Bagli/kopuk bilgisi
+     ust barla birlikte gitmez; kopus zaten kontrol seridinde yaziya doner. */
+  body.in-room { overflow: hidden; }
+  body.in-room .topbar { display: none; }
+  body.in-room #main {
+    max-width: none; height: 100dvh; padding: 0;
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  body.in-room .view--room { display: flex; height: 100%; gap: 0; }
+  body.in-room .room__main {
+    display: flex; flex-direction: column;
+    width: 100%; max-width: none; height: 100%; margin: 0;
+  }
+
+  body.in-room .room__bar {
+    flex: 0 0 auto; flex-wrap: nowrap; gap: var(--s1); margin: 0;
+    padding: 2px var(--s2);
+    background: var(--bg-deep); border-bottom: 2px solid var(--border);
+  }
+  body.in-room .room__bar .btn { min-height: 30px; padding: 0 var(--s2); font-size: 9px; box-shadow: none; }
+  body.in-room .room__bar .ic { width: 14px; height: 14px; }
+  body.in-room .room__name { display: none; }
+  body.in-room #roomCode { font-size: 14px; letter-spacing: .1em; }
+  body.in-room .room__panelbtn { display: inline-flex; margin-left: auto; }
+
+  body.in-room .scoreboard {
+    flex: 0 0 auto; gap: var(--s2);
+    padding: 2px var(--s3); border-width: 0 0 2px;
+  }
+  body.in-room .score__name { font-size: 8px; }
+  body.in-room .score__val { font-size: 13px; }
+  body.in-room .score { gap: var(--s2); }
+  /* Raunt ve ruzgar iki satirdan tek satira iner; 20 piksel kazanir. */
+  body.in-room .score__mid { font-size: 14px; line-height: 1.2; }
+  body.in-room .score__mid span { display: inline; }
+  body.in-room .score__mid #windLabel::before { content: " · "; }
+
+  /* Canvas'in oranini object-fit korur: kutu ne sekle girerse girsin sahne
+     bozulmaz, artan yer .stage'in siyah zemininde kalir. Boylece sahneye
+     "kalan butun yer" verilebilir, ayrica genislik hesabi gerekmez. */
+  body.in-room .stage { flex: 1 1 auto; min-height: 0; border-width: 0; }
+  body.in-room .stage canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%; object-fit: contain;
+  }
+
+  body.in-room .controls {
+    flex: 0 0 auto; padding: var(--s1) var(--s3) var(--s2); border-width: 2px 0 0;
+  }
+  body.in-room .controls__turn { min-height: 0; margin-bottom: 2px; font-size: 15px; line-height: 1.2; }
+  body.in-room .controls__row { flex-wrap: nowrap; gap: var(--s2); align-items: center; }
+  /* Etiket kaydiricinin ustunde degil YANINDA: dar ekranda kazanilan her
+     satir dogrudan sahnenin yuksekligine, o da genisligine yaziliyor. */
+  body.in-room .ctl { display: flex; align-items: center; gap: var(--s2); flex: 1 1 0; min-width: 0; }
+  body.in-room .ctl .field__label { flex: 0 0 auto; margin: 0; font-size: 9px; }
+  body.in-room .ctl input[type="range"] { flex: 1 1 auto; height: 28px; }
+  body.in-room .btn--fire { flex: 0 0 auto; min-height: 36px; padding: 0 var(--s3); font-size: 10px; }
+  body.in-room .hint { display: none; }
+  body.in-room .timer__bar { width: 56px; height: 10px; }
+
+  /* Takimlar ve sohbet sagdan giren cekmeceye tasinir. Kapaliyken
+     visibility ile erisim agacindan da cikar; gecis bittikten SONRA
+     kapansin diye visibility gecikmeli. */
+  body.in-room .room__side {
+    position: fixed; top: 0; right: 0; bottom: 0; z-index: var(--z-modal);
+    width: min(340px, 84vw); gap: var(--s3);
+    padding: var(--s3);
+    padding-right: max(var(--s3), env(safe-area-inset-right));
+    padding-bottom: max(var(--s3), env(safe-area-inset-bottom));
+    background: var(--bg-deep); border-left: 3px solid var(--border-strong);
+    overflow-y: auto; overscroll-behavior: contain;
+    visibility: hidden; transform: translateX(101%);
+    transition: transform var(--dur) var(--ease-out), visibility 0s linear var(--dur);
+  }
+  body.in-room.is-drawer .room__side {
+    visibility: visible; transform: translateX(0);
+    transition: transform var(--dur) var(--ease-out), visibility 0s;
+  }
+  body.in-room .panel { border-width: 2px; padding: var(--s2) var(--s3) var(--s3); }
+  body.in-room .panel--chat { min-height: 0; }
+  body.in-room .chat { height: 32vh; }
+  body.in-room.is-drawer .sidescrim {
+    display: block; position: fixed; inset: 0;
+    z-index: calc(var(--z-modal) - 1); background: rgba(4,6,14,.6);
+  }
+}
+
+/* Dikey telefon: 12:5 bir sahneyi anlamli bicimde sigdirmanin yolu yok.
+   Cevirmeyi oneririz; yon kilidi acik kullanici uyariyi gecebilir. */
+@media (orientation: portrait) and (max-width: 700px) {
+  body.in-room:not(.rotate-ok) .rotate {
+    display: grid; place-items: center;
+    position: fixed; inset: 0; z-index: calc(var(--z-modal) - 1);
+    padding: var(--s5);
+    padding-bottom: max(var(--s5), env(safe-area-inset-bottom));
+    background: rgba(8,13,26,.97);
+  }
+}
+.rotate__box { display: grid; justify-items: center; gap: var(--s3); max-width: 34ch; text-align: center; }
+.rotate__box h2 { margin: 0; font-size: 13px; color: var(--warn); line-height: 1.6; }
+.rotate__box p { margin: 0; }
+.rotate__ic {
+  width: 56px; height: 56px; color: var(--ega-cyan);
+  fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: square; stroke-linejoin: miter;
 }
 
 @media (prefers-reduced-motion: reduce) {

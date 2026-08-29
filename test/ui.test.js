@@ -190,6 +190,37 @@ test("sunucunun yolladığı her anahtar sözlükte var", () => {
   }
 });
 
+/* Sayfadaki her data-i18n* özniteliği çalışma anında sözlükten çözülür; yanlış
+   yazılmış bir anahtar kullanıcıya ham anahtar ("room.panel") olarak görünür.
+   Üstelik bu düğmeler yalnızca belirli ekran ölçülerinde görünür olduğu için
+   hata elle denemede kolayca gözden kaçar. */
+test("index.html'deki her çeviri anahtarı sözlükte var", () => {
+  const html = fs.readFileSync(path.join(ROOT, "public/index.html"), "utf8");
+  const kullanilan = [...new Set(
+    [...html.matchAll(/data-i18n(?:-ph|-aria)?="([^"]+)"/g)].map((m) => m[1])
+  )];
+  assert.ok(kullanilan.length > 40, "anahtarlar bulunamadı, tarama bozulmuş olabilir");
+  for (const key of kullanilan) {
+    for (const lang of I18N.langs) {
+      assert.ok(I18N.tables[lang][key] !== undefined,
+        lang + " sözlüğünde " + key + " yok (index.html)");
+    }
+  }
+});
+
+/* Sahne 12:5 ve dar ekranda genişliği yükseklikten türetiliyor; çentikli
+   telefonda kenar boşluğunun kapanması ise yalnızca viewport-fit=cover ile
+   oluyor. İkisi de sessizce silinebilecek tek satırlık kurallar. */
+test("mobil düzenin dayandığı iki satır yerinde", () => {
+  const html = fs.readFileSync(path.join(ROOT, "public/index.html"), "utf8");
+  assert.match(html, /name="viewport"[^>]*viewport-fit=cover/,
+    "viewport-fit=cover yok; çentik güvenli alanı kenarlarda boşluk bırakır");
+  const css = fs.readFileSync(path.join(ROOT, "public/css/style.css"), "utf8");
+  assert.ok(css.includes("env(safe-area-inset-left)"), "sol güvenli alan payı yok");
+  assert.ok(css.includes("@media (orientation: landscape) and (max-height: 620px)"),
+    "dar ekran maç modu kırılma noktası yok");
+});
+
 test("takım anahtarı yerel isme çevrilir", () => {
   I18N.set("tr");
   assert.strictEqual(I18N.t("sys.matchWin", { team: "red" }), "Kırmızı takım maçı kazandı.");

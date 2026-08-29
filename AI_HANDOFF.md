@@ -1,6 +1,6 @@
 # AI_HANDOFF — Gorillas Online
 
-Son güncelleme: 2026-08-27
+Son güncelleme: 2026-08-29
 
 ## Durum
 
@@ -422,7 +422,12 @@ kuruyor, yoksa rüzgârı kapalı odalarda yoğunluk yanlış çıkardı.
   `option` öğelerine piksel font verildi ama Windows/Chrome listeyi kendi
   çizdiği için font uygulanmayabilir; tarayıcıdan doğrulanamaz.
 
-## Sıradaki oturum: mobil oynanabilirlik (planlandı 2026-08-27, başlangıç 2026-08-29)
+## Mobil oynanabilirlik — UYGULANDI (2026-08-29)
+
+Aşağıdaki plan 2026-08-29'da uygulandı; ne yapıldığı ve ölçülen sonuçlar
+"Revize 7" bölümünde. Plan, kararların gerekçesi kaybolmasın diye duruyor.
+
+### Planın özgün hâli (2026-08-27)
 
 Bir sonraki oturumun İLK işi bu. Sinan oyunu telefondan ve tabletten
 açtığında sahnenin ekrana sığmadığını, kaydırıcıları ayarlayıp muzu attıktan
@@ -529,12 +534,89 @@ yapılmayacak:
 - Gorilin üzerine düşen molozun gorili öldürmemesi.
 - Gorilin havada asılı kalması.
 
+## Revize 7 (2026-08-29) — mobil oynanabilirlik
+
+Telefon ve tablette sahne artık ekrana sığıyor; maç boyunca hiçbir yerde
+kaydırma gerekmiyor. Dört kök nedenin dördü de kapatıldı.
+
+**Sahne genişliği artık yükseklikten türüyor.** `.room__main` üzerindeki
+"yüksekliğe sığdır" kuralı `@media (min-width: 1024px)` bloğunun içinden
+çıkarılıp taban kurala taşındı; artık her ekran genişliğinde çalışıyor
+(`max-width: min(100%, max(320px, calc((100dvh - 420px) * 2.4)))`). 420
+piksel, sahnenin üstünde ve altında duran değişmez öğe yığınının (üst bar +
+oda barı + skor tablosu + kontroller) ölçülmüş yaklaşık toplamıdır;
+masaüstü bloğu kendi 450'lik sabitiyle bunu ezmeye devam ediyor.
+
+**Dar ekranda tam ekran maç modu.** Kırılma noktası
+`(orientation: landscape) and (max-height: 620px)`. Devrede iken: sayfa
+kaydırması kapanır, üst bar gizlenir, oda görünümü `100dvh` kaplar, oda
+barı ve skor tablosu inceltilir, açı/hız etiketleri kaydırıcının ÜSTÜNDEN
+YANINA geçer (bu tek değişiklik kontrol şeridini 87 pikselden 68'e indirdi,
+kazanılan 19 piksel doğrudan sahnenin genişliğine yazıldı) ve `.hint`
+satırı gizlenir.
+
+**Canvas oranını `object-fit: contain` koruyor.** Sahneye "kalan bütün
+yer" veriliyor; kutu hangi şekle girerse girsin 12:5 bozulmuyor, artan yer
+`.stage`in siyah zemininde kalıyor. Yükseklikten genişlik hesaplayan bir
+CSS ifadesine gerek kalmadı. **Buradaki tuzak:** `height: 100%` + `aspect-ratio`
++ `max-width: 100%` üçlüsü İŞE YARAMAZ — yükseklik kesin olduğu için
+max-width kırpınca oran korunmaz, sahne yatay olarak ezilir. `object-fit`
+yolundan geri dönmeyin.
+
+**Takımlar ve sohbet çekmeceye taşındı.** Dar ekranda `.room__side` sağdan
+giren panele dönüşüyor; oda barındaki PANEL düğmesi açıyor, perde/ESC/oda
+değişimi/yön değişimi kapatıyor. Kapalıyken `visibility: hidden` ile erişim
+ağacından da çıkıyor. Geniş ekranda düğme CSS ile gizli, panel her zamanki
+yerinde.
+
+**Çentik boşluğu kapandı.** Viewport etiketine `viewport-fit=cover`,
+oda görünümüne `env(safe-area-inset-*)` payları eklendi.
+
+**Dikey modda "telefonu yan çevir" uyarısı** (`(orientation: portrait) and
+(max-width: 700px)`, yalnızca oda görünümünde). Yön kilidi açık kullanıcıyı
+kilitlememek için "YİNE DE DEVAM ET" ile geçilebiliyor; geçilince dikey
+düzen de sahneyi ve ateş düğmesini tek ekranda gösteriyor. 700 piksel sınırı
+bilerek seçildi: 768 ve 810 piksellik tabletler dikeyken zaten rahat sığıyor,
+onlara uyarı çıkmıyor.
+
+Ayrıca `body`ye `touch-action: manipulation` eklendi (çift dokunuşla
+yakınlaştırmanın getirdiği ~300 ms düğme gecikmesi gitti; parmakla
+yakınlaştırma açık kaldı).
+
+### Ölçülen sonuçlar (Playwright, gerçek sunucuya karşı)
+
+Odaya girildi, bot eklendi, maç başlatıldı, muz atıldı; her ölçüde
+`document.scrollHeight == window.innerHeight`, yani kaydırma yok.
+
+| Ekran | Sahne | Kontrollerin alt kenarı |
+|---|---|---|
+| 844×390 (iPhone 14 yatay) | 631×263 | 390 / 390 |
+| 667×375 (SE yatay) | 594×248 | 375 / 375 |
+| 810×1080 (iPad dikey) | 757×315 | 715 / 1080 |
+| 1024×768 (iPad yatay) | 659×275 | 666 / 768 |
+| 1440×900 (masaüstü) | değişmedi | değişmedi |
+
+### Bilinmesi gerekenler
+
+- **Kısa masaüstü pencereleri de maç moduna girer.** Kırılma noktası girdi
+  türüne değil yüksekliğe bakıyor; 620 pikselden alçak yatay bir tarayıcı
+  penceresinde üst bar gizlenip sahne büyüyor. Kasıtlı: o pencerede eski
+  düzen kaydırma istiyordu, yenisi istemiyor. `(hover: none)` ile dokunmatik
+  cihazlara kısıtlamak mümkün ama o zaman kural test edilemez hâle geliyordu.
+- **Maç modunda üst bar yok**, yani bağlantı rozeti de yok. Kopma bilgisi
+  kaybolmuyor: `net.lost` metni kontrol şeridindeki sıra satırına yazılıyor.
+- Testler: `test/ui.test.js` içine iki koruma eklendi — index.html'deki her
+  `data-i18n*` anahtarının sözlükte bulunması, ve mobil düzenin dayandığı üç
+  satırın (viewport-fit, safe-area, kırılma noktası) yerinde durması. İkisi
+  de kaldırma denemesiyle kırmızıya döndüğü doğrulandı. `npm test` → 129/129.
+
 ## Sıradaki adımlar (yapılmadı)
 
-- **SIRADAKİ İŞ: mobil oynanabilirlik.** Telefonda ve tablette sahne ekrana
-  sığmıyor, sohbet oyunun çok altında kalıyor. Teşhis, kararlaştırılan yol ve
-  mobil sürüm kararı için yukarıdaki "Sıradaki oturum: mobil oynanabilirlik"
-  bölümüne bakın.
+- **PWA (mobil yolun ikinci adımı).** Düzen işi bitti; sırada manifest ve
+  tam ekran ile oyunun ana ekrana eklenebilmesi var. Karar ve gerekçe
+  yukarıdaki "Mobil sürüm kararı" bölümünde.
+- **Canvas üzerinde parmakla nişan alma.** Ayrı kapsam olarak önerildi,
+  Sinan'ın onayı henüz alınmadı. Ayrıntı yukarıda.
 - Odaya maç ortasında giren izleyici, süren atışın canlandırmasını görmez;
   yalnızca sonucu görür.
 - Takım arkadaşını vurmak serbest; dost ateşi engellenmiyor.

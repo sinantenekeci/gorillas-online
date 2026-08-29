@@ -13,6 +13,7 @@
     roomSearch: $("roomSearch"), refreshBtn: $("refreshBtn"), createBtn: $("createBtn"),
     roomName: $("roomName"), roomCode: $("roomCode"), copyLinkBtn: $("copyLinkBtn"),
     leaveBtn: $("leaveBtn"), settingsBtn: $("settingsBtn"),
+    panelBtn: $("panelBtn"), sideScrim: $("sideScrim"), rotateDismiss: $("rotateDismiss"),
     redVal: $("redVal"), blueVal: $("blueVal"),
     roundLabel: $("roundLabel"), windLabel: $("windLabel"),
     overlay: $("overlay"),
@@ -443,8 +444,35 @@
   function switchView(inRoom) {
     show(el.viewRoom, inRoom);
     show(el.viewLobby, !inRoom);
+    /* Dar ekran duzeni tamamen CSS'te; JS yalnizca "odadayiz" bilgisini
+       govdeye yazar. Odadan cikarken cekmece acik kalmasin. */
+    document.body.classList.toggle("in-room", inRoom);
+    if (!inRoom) setDrawer(false);
     if (inRoom) el.chatInput.focus();
   }
+
+  /* ---------- dar ekran cekmecesi ----------
+     Takimlar ve sohbet yatay telefonda sagdan giren panelde durur. Panel
+     dugmesi genis ekranda CSS ile gizli oldugu icin bu durum orada hic
+     acilmaz; yine de yon degisiminde asili kalmasin diye kapatiliyor. */
+  function setDrawer(on) {
+    document.body.classList.toggle("is-drawer", on);
+    el.panelBtn.setAttribute("aria-expanded", on ? "true" : "false");
+  }
+  el.panelBtn.addEventListener("click", () => {
+    setDrawer(!document.body.classList.contains("is-drawer"));
+  });
+  el.sideScrim.addEventListener("click", () => setDrawer(false));
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && document.body.classList.contains("is-drawer")) setDrawer(false);
+  });
+  /* Yatayken acilan cekmece dikeye donunce ekranin ortasinda kalirdi. */
+  window.addEventListener("orientationchange", () => setDrawer(false));
+
+  /* Yon kilidi acik olan kullaniciyi dikey modda kilitlemeyelim. */
+  el.rotateDismiss.addEventListener("click", () => {
+    document.body.classList.add("rotate-ok");
+  });
 
   function renderRoom() {
     if (!room) return;
